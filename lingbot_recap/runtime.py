@@ -76,10 +76,14 @@ class ExperienceCollector:
             return True
         return False
 
-    def _confirm_takeover(self) -> None:
+    def _align_leader(self) -> None:
         self.notifier.announce("主臂即将自动对齐，请松手并远离关节")
         time.sleep(1.0)
-        self.handoff.confirm_takeover()
+        self.handoff.align_leader()
+        self.notifier.announce("主臂已对齐。按按键 2 卸力并开始人工接管")
+
+    def _release_leader(self) -> None:
+        self.handoff.release_leader_for_human()
         self.detectors.reset()
         self.notifier.announce("主臂已卸力并确认，可以人工接管")
 
@@ -87,12 +91,24 @@ class ExperienceCollector:
         event = self.events.poll()
         if self._handle_common_event(event):
             return
-        if event is InputEvent.TAKEOVER_OR_HAND_BACK:
-            self._confirm_takeover()
+        if event in (InputEvent.ALIGN_LEADER, InputEvent.TAKEOVER_OR_HAND_BACK):
+            self._align_leader()
         elif event is InputEvent.RESUME_AUTO:
             self.handoff.resume_auto()
             self.detectors.reset()
             self.notifier.announce("已恢复自动控制")
+        time.sleep(0.02)
+
+    def _aligned_step(self) -> None:
+        event = self.events.poll()
+        if self._handle_common_event(event):
+            return
+        if event in (InputEvent.RELEASE_LEADER, InputEvent.TAKEOVER_OR_HAND_BACK):
+            self._release_leader()
+        elif event is InputEvent.RESUME_AUTO:
+            self.handoff.resume_auto()
+            self.detectors.reset()
+            self.notifier.announce("已取消接管并恢复自动控制")
         time.sleep(0.02)
 
     def _human_step(self) -> None:
@@ -138,7 +154,9 @@ class ExperienceCollector:
         )
         if detection is not None:
             self.handoff.request_takeover(detection.reason, detection.details)
-            self.notifier.announce("检测到策略卡住，已暂停。按空格确认人工接管，按 R 恢复自动")
+            self.notifier.announce(
+                "检测到策略卡住，已暂停。按按键 1/空格对齐主臂，按 R 恢复自动"
+            )
             return
         for action in result.chunk[: self.config.execute_length]:
             if not self.running or self.handoff.mode is not ControlMode.AUTO:
@@ -146,9 +164,13 @@ class ExperienceCollector:
             event = self.events.poll()
             if self._handle_common_event(event):
                 break
+            if event is InputEvent.ALIGN_LEADER:
+                self.handoff.request_takeover("manual_button_1")
+                self._align_leader()
+                break
             if event is InputEvent.TAKEOVER_OR_HAND_BACK:
                 self.handoff.request_takeover("manual_space_key")
-                self._confirm_takeover()
+                self._align_leader()
                 break
             started = time.perf_counter()
             image_jpegs = self.cameras.capture_jpegs()
@@ -167,7 +189,9 @@ class ExperienceCollector:
 
     def run(self) -> Path:
         self.journal.event("controls", {
-            "space": "take over / hand back",
+            "space": "request/confirm takeover or hand back",
+            "button_1": "pause policy and align leader to follower",
+            "button_2": "release aligned leader and grant human control",
             "s": "success and save",
             "f": "failure and save",
             "r": "resume from detector pause",
@@ -194,6 +218,8 @@ class ExperienceCollector:
                     self._auto_chunk()
                 elif self.handoff.mode is ControlMode.TAKEOVER_PENDING:
                     self._pending_step()
+                elif self.handoff.mode is ControlMode.LEADER_ALIGNED:
+                    self._aligned_step()
                 elif self.handoff.mode is ControlMode.HUMAN:
                     self._human_step()
                 elif self.handoff.mode is ControlMode.FAULT:

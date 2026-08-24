@@ -50,6 +50,24 @@ def test_takeover_aligns_and_verifies_before_human_control():
     assert events[-1] == "human_control_granted"
 
 
+def test_two_button_handoff_does_not_unload_until_second_step():
+    follower = FakeArm({name: 5.0 for name in FakeArm().positions})
+    leader = FakeArm()
+    coordinator = HandoffCoordinator(
+        follower,
+        leader,
+        config=HandoffConfig(AlignmentConfig(duration_s=0, settle_reads=1)),
+    )
+    coordinator.request_takeover("button_1")
+    coordinator.align_leader()
+    assert coordinator.mode is ControlMode.LEADER_ALIGNED
+    assert leader.torque_state == 1
+    assert leader.positions == follower.positions
+    coordinator.release_leader_for_human()
+    assert coordinator.mode is ControlMode.HUMAN
+    assert leader.torque_state == 0
+
+
 def test_failed_torque_readback_never_grants_human_control():
     follower = FakeArm({name: 5.0 for name in FakeArm().positions})
     coordinator = HandoffCoordinator(

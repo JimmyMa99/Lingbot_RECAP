@@ -38,12 +38,29 @@ class HandoffCoordinator:
         self._emit("takeover_requested", {"reason": reason, **dict(details or {})})
 
     def confirm_takeover(self) -> None:
+        """Legacy one-call handoff used by the terminal Space control."""
+        self.align_leader()
+        self.release_leader_for_human()
+
+    def align_leader(self) -> None:
         if self.mode is not ControlMode.TAKEOVER_PENDING or self._hold_position is None:
-            raise RuntimeError(f"cannot confirm takeover from {self.mode}")
+            raise RuntimeError(f"cannot align leader from {self.mode}")
         self.mode = ControlMode.ALIGNING_LEADER
         self._emit("leader_alignment_started", {})
         try:
             align_leader_to_follower(self.leader, self._hold_position, self.config.alignment)
+        except Exception as exc:
+            self.mode = ControlMode.FAULT
+            self.follower.command_positions(self._hold_position)
+            self._emit("takeover_failed", {"error": repr(exc)})
+            raise
+        self.mode = ControlMode.LEADER_ALIGNED
+        self._emit("leader_alignment_complete", {})
+
+    def release_leader_for_human(self) -> None:
+        if self.mode is not ControlMode.LEADER_ALIGNED or self._hold_position is None:
+            raise RuntimeError(f"cannot release leader from {self.mode}")
+        try:
             torque_state = self.leader.disable_torque_verified()
         except Exception as exc:
             self.mode = ControlMode.FAULT
@@ -66,10 +83,16 @@ class HandoffCoordinator:
         return action
 
     def resume_auto(self) -> None:
-        if self.mode not in (ControlMode.HUMAN, ControlMode.TAKEOVER_PENDING):
+        if self.mode not in (
+            ControlMode.HUMAN,
+            ControlMode.TAKEOVER_PENDING,
+            ControlMode.LEADER_ALIGNED,
+        ):
             raise RuntimeError(f"cannot resume auto from {self.mode}")
         self._hold_position = self.follower.read_positions()
         self.follower.command_positions(self._hold_position)
+        if self.mode is ControlMode.LEADER_ALIGNED:
+            self.leader.disable_torque_verified()
         self.mode = ControlMode.AUTO
         self._emit("auto_control_resumed", {})
 

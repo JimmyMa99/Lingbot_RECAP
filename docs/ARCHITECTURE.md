@@ -20,18 +20,23 @@ AUTO
   | manual Space: explicit takeover request
   v
 TAKEOVER_PENDING --R--> AUTO
-  | Space
+  | button 1 / Space
   v
 ALIGNING_LEADER
-  | align success + all six Torque_Enable read 0
+  | alignment within tolerance
+  v
+LEADER_ALIGNED --R--> AUTO
+  | button 2 / Space
+  | all six Torque_Enable read 0
   v
 HUMAN --Space--> AUTO
 
 Any alignment/readback/control exception -> FAULT -> preserve partial data and stop.
 ```
 
-The follower remains position-controlled during handoff. The leader is actively aligned, then
-unloaded. Human control is impossible unless torque readback succeeds for every leader motor.
+The follower remains position-controlled during handoff. Alignment and unloading are separate
+operator-authorized transitions. Human control is impossible unless torque readback succeeds for
+every leader motor.
 
 ## Training boundary
 
