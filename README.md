@@ -27,7 +27,7 @@ leader 缓慢对齐 follower，确认对齐后才允许卸掉 leader 力矩并�
 当前仓库实现安全采集层，以及 multi-policy on-policy distillation 的第一阶段。完整 RECAP
 训练仍需单独实现 outcome reward、value model、时序 advantage 和 advantage-conditioned
 policy。多策略蒸馏说明见
-[Multi-policy on-policy distillation](docs/MULTI_POLICY_DISTILLATION.md)。
+[Multi-policy on-policy 蒸馏说明](docs/MULTI_POLICY_DISTILLATION.md)。
 
 ## 硬件配置
 

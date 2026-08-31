@@ -1,15 +1,16 @@
-# Safety contract
+# 安全约束
 
-1. Exactly one process owns `/dev/ttyACM0` and `/dev/ttyACM1`.
-2. Detection only pauses the follower and alerts the operator. It never moves the leader.
-3. Button 1 (or the first Space press) is explicit authorization to align the leader.
-4. During alignment the operator must release the leader and keep hands clear.
-5. The follower stays torque-enabled and holds its measured pose throughout handoff.
-6. Button 2 (or the second Space press) is required before unloading the leader. Human control is
-   granted only after all six leader motors read back `Torque_Enable == 0`.
-7. A failed bus write/readback, camera read failure, or non-finite action enters a fault path.
-8. This version does not yet provide an independent motor-current/temperature overload monitor. Do
-   not run unattended or treat the two-button keyboard as an emergency stop.
-9. A physical power switch or emergency stop remains authoritative over software.
+1. 同一时刻只能有一个进程占用 `/dev/ttyACM0` 和 `/dev/ttyACM1`。
+2. 异常检测器只能暂停并保持 follower、提醒操作员，绝不能主动移动 leader。
+3. 按键 1（或第一次按 Space）表示操作员明确授权 leader 开始对齐。
+4. leader 对齐期间，操作员必须松开 leader，并让手远离机械臂运动范围。
+5. 整个接管过程中，follower 始终保持力矩使能并固定在其实测姿态。
+6. leader 卸力前必须再次按下按键 2（或第二次按 Space）。只有六个 leader 电机均读回
+   `Torque_Enable == 0`，系统才允许进入人工控制。
+7. 总线写入/读回失败、相机读取失败或动作含 NaN/Inf 时，必须进入故障路径并停止。
+8. 当前版本尚未提供独立的电机电流/温度过载监控。不得无人值守运行，也不能把两键键盘
+   当作物理急停使用。
+9. 物理电源开关或急停的控制优先级永远高于软件。
 
-Do the first test with no object, low workspace obstruction, and a second person at the power switch.
+第一次真机测试必须移除物体、清空机械臂工作区域并采用低速，同时安排第二个人守在电源
+开关旁。确认按钮识别、状态切换和事件日志均正确后，才能进行带物体的 rollout。

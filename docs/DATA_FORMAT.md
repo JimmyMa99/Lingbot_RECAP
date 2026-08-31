@@ -1,7 +1,7 @@
-# Experience data format
+# Experience 数据格式
 
-Every rollout is stored continuously from the first autonomous frame. Human intervention data is not
-split away from the policy failure that caused it.
+每次 rollout（真机执行）从第一帧自动策略观测开始连续保存。人工接管数据不会与触发接管的
+策略失败过程分开，以便后续完整还原“失败—接管—纠正—结果”的因果链。
 
 ```text
 episode_YYYYmmdd_HHMMSS_<id>.partial/
@@ -13,37 +13,38 @@ episode_YYYYmmdd_HHMMSS_<id>.partial/
   images/wrist/00000000.jpg
 ```
 
-A cleanly finished episode is atomically renamed from `.partial` to `.complete` and gains
-`result.json`. A crash leaves a readable `.partial` directory. Run `lingbot-recap audit` to mark and
-list recoverable sessions.
+正常结束的 episode 会从 `.partial` 原子重命名为 `.complete`，并新增 `result.json`。进程
+崩溃时会保留仍可读取的 `.partial` 目录。使用 `lingbot-recap audit` 标记并列出可恢复的
+采集会话。
 
-Each frame records:
+每一帧记录以下内容：
 
-- observation and both camera paths;
-- action proposed by LingBot;
-- action actually sent to the follower;
-- action source (`lingbot_policy` or `human_intervention`);
-- control mode and timestamps.
+- 策略观测和两路相机图像路径；
+- LingBot 建议执行的动作；
+- 实际发送给 follower 的动作；
+- 动作来源：`lingbot_policy` 或 `human_intervention`；
+- 当前控制模式和各类时间戳。
 
-Each event records policy chunks, detector alerts, intervention reason, leader alignment, verified
-leader torque state, hand-back, outcome, and runtime errors. This is an RL experience journal. It is
-intentionally excluded from existing SFT manifests.
+每个事件记录 action chunk、检测器报警、接管原因、leader 对齐、已验证的 leader 力矩状态、
+控制权交还、任务结果及运行时异常。这是一份 RL experience 日志，默认明确排除在现有 SFT
+数据清单之外。
 
-## Multi-policy teacher labels
+## Multi-policy teacher 标签
 
-Offline `lingbot-recap relabel` adds two sidecar files without changing the source journal:
+离线运行 `lingbot-recap relabel` 后会新增两个旁路文件，不会修改原始日志：
 
 ```text
 teacher_labels.jsonl
 teacher_labels.meta.json
 ```
 
-Each label row contains the source `frame_index`, exact task, teacher key/checkpoint/server, inference
-timing, the first `teacher_action`, the complete 16-step `teacher_chunk`, and the original student action.
-The metadata records the labeling stride, allowed action sources, counts, and the
-`MULTI_POLICY_ON_POLICY_DISTILLATION_ONLY` usage boundary. An interrupted run leaves
-`teacher_labels.partial.jsonl` and resumes from already completed frame indices.
+每条标签包含原始 `frame_index`、精确任务文本、teacher 名称/checkpoint/server、推理耗时、
+第一步 `teacher_action`、完整 16 步 `teacher_chunk`，以及原 student 动作。元数据记录标签
+步长、允许的动作来源、样本数量和 `MULTI_POLICY_ON_POLICY_DISTILLATION_ONLY` 使用边界。
 
-The LeRobot exporter writes `DISTILLATION_DATASET_ONLY` and `distillation_provenance.json` into the
-derived dataset. It splits non-contiguous labeled ranges into separate episodes so future-action lookup
-cannot cross a human takeover gap.
+如果标注中途停止，系统会保留 `teacher_labels.partial.jsonl`；重新运行时会跳过已经完成的
+帧，从断点继续。
+
+LeRobot 导出器会在派生数据集中写入 `DISTILLATION_DATASET_ONLY` 和
+`distillation_provenance.json`。它会把不连续的标签区间拆成独立 episode，确保未来动作
+查询不会跨越人工接管造成的时间缺口。
