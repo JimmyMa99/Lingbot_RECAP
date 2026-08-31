@@ -11,9 +11,6 @@
 | `journal` | 持久化保存 experience 记录 | 将数据加入 SFT 清单 |
 | `policy` | 请求 LingBot HTTP 推理服务 | 直接写电机命令 |
 | `runtime` | 按控制频率调度各模块 | 绕过 `handoff` 的控制权判断 |
-| `multi_policy` | 将精确任务文本路由到对应专项 teacher | 猜测任务或进行模糊匹配 |
-| `distillation` | 离线为已保存状态生成 teacher 动作标签 | 进入真机控制循环 |
-| `lerobot_export` | 生成带 teacher 动作的派生训练数据集 | 修改原始 RECAP experience |
 
 ## 状态切换
 
@@ -50,9 +47,5 @@ HUMAN（人工控制） --Space--> AUTO
 4. 计算每个时间步的 advantage（优势值）；
 5. 构造带 advantage 条件的 LingBot 训练样本。
 
-本仓库的采集运行时不会修改已有 LingBot SFT 数据清单。
-
-Multi-policy（多策略）蒸馏是一条独立的离线流水线：把 student 访问过并保存下来的状态按
-任务路由给冻结的 teacher；将 teacher 标签写入可断点恢复的旁路文件；按照连续的策略控制
-区间切分数据；最后导出派生的 LeRobot 数据集。随后使用常规 LingBot 训练器，将该数据集与
-明确指定的 replay（回放）数据混合训练。
+本仓库 `main` 分支的采集运行时不会修改已有 LingBot SFT 数据清单。实验性的多策略
+on-policy 蒸馏代码位于 `mopd` 分支，与 RECAP 安全接管主线隔离。

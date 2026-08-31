@@ -20,14 +20,13 @@ leader 缓慢对齐 follower，确认对齐后才允许卸掉 leader 力矩并�
 - 逐电机读回 `Torque_Enable`，只有六个 leader 电机全部为 0 才授予人工控制；
 - 连续保存相机观测、关节状态、策略动作、实际动作、控制来源、事件和结果；
 - 崩溃后保留 `.partial` 目录，可审计、恢复，不浪费 rollout；
-- 精确 task-to-teacher 路由，拒绝未知任务和重复路由；
-- student rollout 可离线 teacher 重标注并导出为 LeRobot v3 蒸馏数据；
 - 终端键盘仍可作为两键设备的备用控制入口。
 
-当前仓库实现安全采集层，以及 multi-policy on-policy distillation 的第一阶段。完整 RECAP
-训练仍需单独实现 outcome reward、value model、时序 advantage 和 advantage-conditioned
-policy。多策略蒸馏说明见
-[Multi-policy on-policy 蒸馏说明](docs/MULTI_POLICY_DISTILLATION.md)。
+当前仓库实现的是安全采集层。完整 RECAP 训练仍需单独实现 outcome reward、value model、
+时序 advantage 和 advantage-conditioned policy。
+
+多策略 on-policy 蒸馏属于另一条实验路线，代码与使用文档位于 `mopd` 分支，不放在
+RECAP 的 `main` 分支中。
 
 ## 硬件配置
 
@@ -249,28 +248,6 @@ lingbot-recap audit \
 独立清洗工具抽取连续、成功且动作语义一致的人工片段，不能把失败策略前缀或 leader 自动对齐
 过程混进监督动作。
 
-## 多策略 on-policy 蒸馏
-
-三个专项策略可以按任务作为 teacher，对通用 student 的真机 rollout 做离线动作重标注：
-
-```bash
-lingbot-recap validate-teachers \
-  --teacher-registry configs/multi_policy_teachers.local.json
-
-lingbot-recap relabel \
-  --teacher-registry configs/multi_policy_teachers.local.json \
-  --experience-root /home/mzm/lerobot_data/recap_experience
-
-lingbot-recap export-distill \
-  --experience-root /home/mzm/lerobot_data/recap_experience \
-  --output-root /home/mzm/lerobot_data/mopd_teacher_labeled_v1 \
-  --repo-id mzm/lingbot_mopd_teacher_labeled_v1
-```
-
-默认只重标注 student 自动控制状态，不把人工接管动作混入。导出器会把接管形成的时间间隙拆成
-独立 episode，防止 LingBot 的未来 action chunk 跨过控制权切换。完整设计、局限与训练配方见
-[docs/MULTI_POLICY_DISTILLATION.md](docs/MULTI_POLICY_DISTILLATION.md)。
-
 ## 代码结构
 
 ```text
@@ -281,9 +258,6 @@ lingbot_recap/
   hardware.py    LeRobot 0.4.x / Feetech SO-101 适配
   cameras.py     top/wrist 观测采集
   policy.py      LingBot HTTP 推理客户端
-  multi_policy.py 任务到专项 teacher 的安全路由
-  distillation.py student experience 离线 teacher 重标注
-  lerobot_export.py teacher action 导出为 LeRobot v3 数据集
   journal.py     追加式、可恢复 experience 记录
   runtime.py     采集调度循环
 tools/

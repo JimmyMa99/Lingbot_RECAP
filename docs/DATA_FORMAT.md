@@ -28,23 +28,3 @@ episode_YYYYmmdd_HHMMSS_<id>.partial/
 每个事件记录 action chunk、检测器报警、接管原因、leader 对齐、已验证的 leader 力矩状态、
 控制权交还、任务结果及运行时异常。这是一份 RL experience 日志，默认明确排除在现有 SFT
 数据清单之外。
-
-## Multi-policy teacher 标签
-
-离线运行 `lingbot-recap relabel` 后会新增两个旁路文件，不会修改原始日志：
-
-```text
-teacher_labels.jsonl
-teacher_labels.meta.json
-```
-
-每条标签包含原始 `frame_index`、精确任务文本、teacher 名称/checkpoint/server、推理耗时、
-第一步 `teacher_action`、完整 16 步 `teacher_chunk`，以及原 student 动作。元数据记录标签
-步长、允许的动作来源、样本数量和 `MULTI_POLICY_ON_POLICY_DISTILLATION_ONLY` 使用边界。
-
-如果标注中途停止，系统会保留 `teacher_labels.partial.jsonl`；重新运行时会跳过已经完成的
-帧，从断点继续。
-
-LeRobot 导出器会在派生数据集中写入 `DISTILLATION_DATASET_ONLY` 和
-`distillation_provenance.json`。它会把不连续的标签区间拆成独立 episode，确保未来动作
-查询不会跨越人工接管造成的时间缺口。
