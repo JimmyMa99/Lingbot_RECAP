@@ -110,6 +110,6 @@ cat "${BASE}/configs/newdata_pick_yellow_eval_20260829.txt" \
 
 cd "${BASE}/code/lingbot"
 export CUDA_VISIBLE_DEVICES=0 MASTER_PORT=62641
-bash train.sh tasks/vla/train_lingbotvla.py \
+bash train.sh tasks/vla/train_lingbotvla_eval.py \
   "${BASE}/code/Lingbot_RECAP/configs/mopd_offline_bootstrap_h20_single_gpu.yaml" \
   2>&1 | tee "${RUN}/logs/student_train_gpu0.log"
