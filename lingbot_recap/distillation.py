@@ -219,7 +219,12 @@ class ExperienceRelabeler:
                 "training_contract_id": contract.contract_id,
                 "training_contract": contract.to_mapping(),
                 "created_at_unix": time.time(),
-                "training_use": "MULTI_POLICY_ON_POLICY_DISTILLATION_ONLY",
+                "training_use": (
+                    "MULTI_POLICY_OFFLINE_BOOTSTRAP_DISTILLATION"
+                    if metadata.get("training_use")
+                    == "OFFLINE_BOOTSTRAP_FOR_DISTILLATION_NOT_ON_POLICY"
+                    else "MULTI_POLICY_ON_POLICY_DISTILLATION_ONLY"
+                ),
             },
         )
         return RelabelSummary(episode, task, teacher.key, labeled, skipped, output, preview)

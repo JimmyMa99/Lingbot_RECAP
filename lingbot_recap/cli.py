@@ -11,6 +11,7 @@ from .inputs import CompositeEventSource, KeyboardEventSource, LinuxTwoButtonEve
 from .journal import ExperienceJournal
 from .lerobot_export import export_lerobot_distillation_dataset
 from .multi_policy import MultiPolicyRouter, sha256_file
+from .offline_bootstrap import import_lingbot_manifest
 from .orchestrator import IterationConfig, IterationRunner
 from .policy import LingBotHTTPPolicy
 from .runtime import CollectorConfig, ExperienceCollector
@@ -76,6 +77,8 @@ def relabel(args) -> None:
     allowed_sources = ["lingbot_policy"]
     if args.include_human_states:
         allowed_sources.append("human_intervention")
+    if args.include_offline_demonstrations:
+        allowed_sources.append("offline_demonstration")
     relabeler = ExperienceRelabeler(
         router,
         RelabelConfig(
@@ -117,6 +120,21 @@ def export_distill(args) -> None:
     print(
         f"EXPORTED {summary.output_root} experiences={summary.source_experiences} "
         f"episodes={summary.output_episodes} frames={summary.output_frames}"
+    )
+
+
+def import_offline(args) -> None:
+    summary = import_lingbot_manifest(
+        args.manifest,
+        args.output_root,
+        sample_stride=args.sample_stride,
+        max_episodes_per_dataset=args.max_episodes_per_dataset,
+        overwrite=args.overwrite,
+    )
+    print(
+        f"IMPORTED {summary.output_root} datasets={summary.datasets} "
+        f"episodes={summary.episodes} frames={summary.frames} "
+        f"skipped_existing={summary.skipped_existing}"
     )
 
 
@@ -191,6 +209,7 @@ def parser() -> argparse.ArgumentParser:
     labels.add_argument("--stride", type=int, default=1)
     labels.add_argument("--max-frames", type=int)
     labels.add_argument("--include-human-states", action="store_true")
+    labels.add_argument("--include-offline-demonstrations", action="store_true")
     labels.add_argument("--include-partial", action="store_true")
     labels.add_argument("--overwrite", action="store_true")
 
@@ -201,6 +220,14 @@ def parser() -> argparse.ArgumentParser:
     export.add_argument("--repo-id", default="mzm/lingbot_recap_distillation")
     export.add_argument("--min-segment-frames", type=int, default=2)
     export.add_argument("--no-videos", action="store_true")
+
+    offline = commands.add_parser("import-offline")
+    offline.set_defaults(func=import_offline)
+    offline.add_argument("--manifest", required=True)
+    offline.add_argument("--output-root", required=True)
+    offline.add_argument("--sample-stride", type=int, default=15)
+    offline.add_argument("--max-episodes-per-dataset", type=int)
+    offline.add_argument("--overwrite", action="store_true")
 
     iteration = commands.add_parser("run-iteration")
     iteration.set_defaults(func=run_iteration)

@@ -75,6 +75,7 @@ def export_lerobot_distillation_dataset(
     first_image_shape = None
     training_contract_id = None
     training_contract = None
+    training_uses: set[str] = set()
     eligible_segment_count = 0
     for episode in experience_paths:
         metadata, pairs = load_labeled_frames(episode)
@@ -83,6 +84,7 @@ def export_lerobot_distillation_dataset(
             raise ValueError(f"preview labels cannot be exported for training: {episode}")
         if label_meta.get("teacher_checkpoint_identity_verified") is not True:
             raise ValueError(f"teacher checkpoint identity was not verified: {episode}")
+        training_uses.add(str(label_meta.get("training_use", "")))
         contract_id = str(label_meta.get("training_contract_id", ""))
         contract = label_meta.get("training_contract")
         if not contract_id or not isinstance(contract, dict):
@@ -204,7 +206,11 @@ def export_lerobot_distillation_dataset(
     provenance = {
         "format": "lingbot_multi_policy_distillation_dataset_v1",
         "created_at_unix": time.time(),
-        "training_use": "MULTI_POLICY_ON_POLICY_DISTILLATION_ONLY",
+        "training_use": (
+            "MULTI_POLICY_OFFLINE_BOOTSTRAP_DISTILLATION"
+            if training_uses == {"MULTI_POLICY_OFFLINE_BOOTSTRAP_DISTILLATION"}
+            else "MULTI_POLICY_ON_POLICY_DISTILLATION_ONLY"
+        ),
         "repo_id": repo_id,
         "source_fps": source_fps,
         "source_stride": source_stride,
