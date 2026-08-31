@@ -32,7 +32,7 @@ data:
 
 train:
   enable_mixed_precision: true
-  output_dir: /mnt/workspace/users/zb/lingbot_ws/experiments/mopd_offline_bootstrap_single_gpu_20260831/student_train
+  output_dir: /mnt/workspace/users/zb/lingbot_ws/experiments/mopd_offline_bootstrap_single_gpu_20260831/student_train_2gpu
   use_lora: true
   train_expert_only: false
   freeze_vision_encoder: true
@@ -79,7 +79,7 @@ train:
   lr_decay_style: constant
   optimizer: anyprecision_adamw
   num_train_epochs: 1
-  micro_batch_size: 28
+  micro_batch_size: 14
   global_batch_size: 28
   gradient_accumulation_steps: 1
   eval_every_epoch_fraction: 0.5
