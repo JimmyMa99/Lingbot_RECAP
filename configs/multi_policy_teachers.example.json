@@ -1,5 +1,28 @@
 {
-  "format": "lingbot_multi_policy_registry_v1",
+  "format": "lingbot_multi_policy_registry_v2",
+  "training_contract": {
+    "norm_stats": {
+      "path": "/absolute/path/to/norm_stats.json",
+      "sha256": "REPLACE_WITH_64_CHARACTER_SHA256"
+    },
+    "robot_config": {
+      "path": "/absolute/path/to/so_arm101.yaml",
+      "sha256": "REPLACE_WITH_64_CHARACTER_SHA256"
+    },
+    "camera_mapping": {
+      "top": "camera_top",
+      "wrist": "camera_wrist_left"
+    },
+    "action_space": "so101_calibrated_absolute_6d_v1",
+    "joints": [
+      "shoulder_pan",
+      "shoulder_lift",
+      "elbow_flex",
+      "wrist_flex",
+      "wrist_roll",
+      "gripper"
+    ]
+  },
   "teachers": [
     {
       "key": "pick_yellow",

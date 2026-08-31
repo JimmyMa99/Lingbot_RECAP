@@ -1,0 +1,56 @@
+--- a/server_http.py
++++ b/server_http.py
+@@ -31,6 +31,7 @@
+ import io
+ import os
+ import time
++from pathlib import Path
+ from typing import Dict, List, Optional
+ 
+ import numpy as np
+@@ -51,6 +52,7 @@
+ _model_server: Optional[LingbotVLAv2Server] = None
+ _default_robo = "so_arm101"
+ _default_use_length = 16
++_model_path = ""
+ 
+ 
+ class InferRequest(BaseModel):
+@@ -70,7 +72,11 @@
+ 
+ @app.get("/healthz")
+ def healthz():
+-    return {"status": "ok", "model_loaded": _model_server is not None}
++    return {
++        "status": "ok",
++        "model_loaded": _model_server is not None,
++        "checkpoint": _model_path or None,
++    }
+ 
+ 
+ @app.post("/reset")
+@@ -123,7 +129,7 @@
+ 
+ 
+ def main():
+-    global _model_server, _default_use_length
++    global _model_server, _default_use_length, _model_path
+     ap = argparse.ArgumentParser(description="LingBot-VLA-V2-6B HTTP inference server")
+     ap.add_argument("--model_path", default="/export4/mzm/models/lingbot-vla-v2-6b")
+     ap.add_argument("--host", default="0.0.0.0")
+@@ -133,12 +139,13 @@
+     ap.add_argument("--use_compile", action="store_true", default=False)
+     args = ap.parse_args()
+     _default_use_length = args.use_length
++    _model_path = str(Path(args.model_path).expanduser().resolve())
+ 
+-    print(f"加载模型: {args.model_path} ...")
++    print(f"加载模型: {_model_path} ...")
+     t0 = time.time()
+     _model_server = LingbotVLAv2Server(
+-        args.model_path,
++        _model_path,
+         use_length=args.use_length,
+         # Official deployment semantics: one observation produces one complete
+         # action chunk.  The robot executes that chunk at the dataset control FPS
+

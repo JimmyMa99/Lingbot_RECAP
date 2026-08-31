@@ -14,6 +14,7 @@
 | `multi_policy` | 将精确任务文本路由到对应专项 teacher | 猜测任务或进行模糊匹配 |
 | `distillation` | 离线为已保存状态生成 teacher 动作标签 | 进入真机控制循环 |
 | `lerobot_export` | 生成带 teacher 动作的派生训练数据集 | 修改原始 RECAP experience |
+| `orchestrator` | 可恢复地串联校验、标注、导出和外部训练命令 | 直接控制机械臂或绕过 teacher 身份校验 |
 
 ## 状态切换
 

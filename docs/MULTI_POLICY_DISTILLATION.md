@@ -1,110 +1,180 @@
 # Multi-policy on-policy 蒸馏
 
-本仓库实现了把多个 LingBot 专项策略蒸馏到一个通用 LingBot 策略所需的数据与路由层。
-第一版有意复用 LingBot 现有的连续动作 flow matching（流匹配）动作头，以便直接接入当前
-训练代码。
+本分支实现把多个 LingBot 专项策略蒸馏到一个通用策略所需的数据、身份校验、导出和迭代
+调度基础设施。它复用 LingBot 的连续动作 flow-matching 头，不修改真机控制协议。
 
-## 为什么不能直接照搬 LLM MOPD
+## 方法边界
 
-LLM MOPD 会把 student 生成的每个 token 前缀路由给对应领域的 teacher，并优化 teacher 与
-student 的 token 概率分布差异。LingBot 输出的是连续的 16 步 action chunk，动作头采用
-flow matching，并不提供自回归 action token 的对数概率。因此，直接套用 NeMo-RL 或 verl
-这类 LLM MOPD 训练器，优化到的会是语言模型接口，而不是 SO-101 的连续动作分布。
+当前版本采用 student 实际访问的状态分布，但监督目标是 teacher 连续动作：
 
-当前可落地的第一阶段保留相同的 on-policy（由当前 student 实际访问）状态分布，但改用连续
-动作监督目标：
+1. student 在真机执行 rollout，RECAP 保存每个动作前的状态和双相机观测；
+2. 根据精确任务文本把状态路由给对应的冻结 teacher；
+3. teacher 对每个 student 状态输出 16 步 action chunk；
+4. 保存完整 chunk，并以第一步动作作为当前帧的蒸馏标签；
+5. 将连续标签导出为 LeRobot v3 数据集；
+6. 使用 LingBot `L1_fm` 训练器，将蒸馏数据与清洗后的 replay 数据混合。
 
-1. student 在真机执行 rollout，RECAP 在每次 student 动作前保存完整观测；
-2. rollout 结束后，根据精确任务文本把每个已保存状态路由给一个冻结的专项 teacher；
-3. teacher 在每个 student 已访问状态上输出动作，并以第一步动作作为蒸馏标签；
-4. 将连续的已标注状态导出为 LeRobot v3 数据集；
-5. 使用常规 LingBot `L1_fm` 训练器，将蒸馏数据与 replay 示范数据混合训练。
+这是一种 on-policy DAgger/RLDG 风格的连续动作 MOPD 近似。LingBot 尚未提供稳定的连续动作
+概率或 flow-density 评分接口，因此当前实现不是 token-level reverse-KL MOPD。
 
-它是对 MOPD 的一种 on-policy DAgger/RLDG 风格连续动作近似。这样既能减少只在 teacher
-rollout 上训练造成的状态分布偏差，也不需要在真机控制循环中同步等待 teacher，从而降低
-控制停顿风险。等动作头具备稳定的评分接口后，可以把“teacher 第一步动作”监督升级为
-flow vector 或 probability-flow 分布差异。
+## 强制安全检查
 
-## 安全边界与数据边界
+### Teacher 权重身份
 
-- 重标注完全离线运行，不会向电机发送命令。
-- 任务文本只做空白规范化后的精确匹配；任务未知或存在重复路由时立即报错。
-- 默认只标注 `action_source` 为 `lingbot_policy` 的帧。除非显式传入
-  `--include-human-states`，否则排除人工接管状态。
-- 原始 RECAP experience 始终保留 `DO_NOT_ADD_TO_SFT`。派生数据集单独标记为
-  `DISTILLATION_DATASET_ONLY`，并包含 `distillation_provenance.json`。
-- 导出器拒绝覆盖已经存在的数据集目录。
+每个 teacher 的 `/healthz` 必须返回以下字段之一，并且值必须与注册表的绝对 checkpoint
+路径一致：
 
-## Teacher 注册表
+- `checkpoint`
+- `checkpoint_path`
+- `model_path`
+- `adapter_path`
+- `policy_checkpoint`
 
-复制 `configs/multi_policy_teachers.example.json` 为一份只在本机使用的配置，并为每个专项
-策略填写 server 和 checkpoint。多个任务别名可以指向同一个 teacher，但同一个任务不能
-同时指向两个 teacher。
+只有 `model_loaded=true` 不够。若服务没有公开权重身份或路径不一致，所有标注命令都会
+立即失败，防止把错误模型的动作写成目标 teacher 标签。
+
+若现有 LingBot `server_http.py` 尚未返回该字段，可在 LingBot 代码目录应用仓库提供的补丁：
 
 ```bash
-lingbot-recap validate-teachers \
+patch -p1 < /path/to/Lingbot_RECAP/patches/lingbot_server_checkpoint_health.patch
+```
+
+### 训练契约
+
+注册表 v2 顶层必须包含一个共享 `training_contract`：
+
+- normalization stats 文件及 SHA-256；
+- robot config 文件及 SHA-256；
+- `top/wrist` 到 LingBot 相机字段的精确映射；
+- 动作空间名称；
+- 六个关节的固定顺序。
+
+计算哈希：
+
+```bash
+lingbot-mopd fingerprint \
+  /absolute/path/to/norm_stats.json \
+  /absolute/path/to/so_arm101.yaml
+```
+
+复制并填写注册表：
+
+```bash
+cp configs/multi_policy_teachers.example.json \
+  configs/multi_policy_teachers.local.json
+
+lingbot-mopd validate-teachers \
   --teacher-registry configs/multi_policy_teachers.local.json
 ```
 
-所有 teacher 不需要同时常驻显存。`relabel` 只会初始化当前 episode 任务对应的 teacher。
-显卡有限时，可以先启动一个任务的 teacher 并完成其标注，停止服务后再启动下一个 teacher
-继续处理。
+注册表加载时会重新计算两个文件的 SHA-256。contract ID 和完整内容会写入标签元数据及
+`distillation_provenance.json`；不同 contract 的 episode 禁止导出到同一个数据集。
 
 ## 离线 Teacher 标注
 
-按源数据 30 Hz 频率标注所有完整 student rollout：
+全量标注：
 
 ```bash
-lingbot-recap relabel \
+lingbot-mopd relabel \
   --teacher-registry configs/multi_policy_teachers.local.json \
   --experience-root /home/mzm/lerobot_data/recap_experience
 ```
 
-快速冒烟测试时，只标注 8 个 student 帧：
-
-```bash
-lingbot-recap relabel \
-  --teacher-registry configs/multi_policy_teachers.local.json \
-  --episode /path/to/episode.complete \
-  --max-frames 8
-```
-
-标注过程通过 `teacher_labels.partial.jsonl` 支持断点恢复。完整结束后会原子生成：
+标注通过逐行 flush 与 `fsync` 保存到 `teacher_labels.partial.jsonl`，进程重启后跳过已经
+完成的 frame。成功结束后原子生成：
 
 ```text
 teacher_labels.jsonl
 teacher_labels.meta.json
 ```
 
-每一行会保留完整 teacher chunk 供后续分析；第一版训练数据使用其中的 `teacher_action`
-（即 chunk 的第一步动作）作为监督标签。
+默认只标注 `action_source=lingbot_policy`，人工接管帧不会混入蒸馏动作。
 
-## 导出为 LeRobot 数据集
+### Preview 冒烟测试
 
 ```bash
-lingbot-recap export-distill \
+lingbot-mopd relabel \
+  --teacher-registry configs/multi_policy_teachers.local.json \
+  --episode /path/to/episode.complete \
+  --max-frames 8
+```
+
+`--max-frames` 永远生成独立的：
+
+```text
+teacher_labels.preview.jsonl
+teacher_labels.preview.meta.json
+```
+
+它不会生成或占用正式标签文件，因此之后直接运行全量标注即可，不需要删除 preview，也不
+需要 `--overwrite`。
+
+## 导出为 LeRobot
+
+```bash
+lingbot-mopd export-distill \
   --experience-root /home/mzm/lerobot_data/recap_experience \
   --output-root /home/mzm/lerobot_data/mopd_teacher_labeled_v1 \
   --repo-id mzm/lingbot_mopd_teacher_labeled_v1
 ```
 
-过滤人工接管状态后，帧序列中可能出现时间缺口。导出器会把这些缺口拆成独立 episode，避免
-LingBot 在构造未来 action chunk 时跨越控制权切换边界。
+导出器会拒绝：
 
-## LingBot 训练建议
+- preview 标签；
+- 未验证 teacher checkpoint 身份的标签；
+- contract 不一致的数据；
+- NaN/Inf 或错误维度的 state/action；
+- teacher 身份在同一连续 segment 内发生变化；
+- 没有达到最短连续帧数的数据；
+- 覆盖已存在的输出目录。
 
-把导出的数据集作为普通 `multi` 训练清单的一项，并与原始、清洗后的示范数据混合。保守的
-起始比例是每 1 份蒸馏样本搭配 1～2 份 replay 样本。robot config、动作/状态 normalization
-以及相机映射必须与各个 teacher 保持一致。
+人工介入造成的时间缺口会切成不同 episode，未来 action chunk 不会跨越控制权切换。
 
-第一次实验建议：
+## 可恢复迭代调度器
 
-1. student 从所有专项策略的共同祖先 checkpoint 初始化；
-2. 所有专项 teacher 保持冻结；
-3. 在三个真机任务上，比较以下方法的成功率：
-   - 仅使用混合 SFT；
+`run-iteration` 串联“teacher 检查 → 全量标注 → 导出 → replay 清单 → 训练命令 →
+后处理命令”，并将每个阶段写入 `iteration_state.json`：
+
+```bash
+lingbot-mopd run-iteration \
+  --iteration 1 \
+  --teacher-registry configs/multi_policy_teachers.local.json \
+  --experience-root /home/mzm/lerobot_data/recap_experience \
+  --run-root /export4/mzm/output/lingbot_mopd \
+  --repo-id mzm/lingbot_mopd \
+  --replay-manifest /path/to/clean_replay.txt \
+  --replay-repeat 2 \
+  --train-command '/path/to/train_mopd_iteration.sh' \
+  --post-train-command '/path/to/merge_and_validate.sh'
+```
+
+训练命令会收到：
+
+```text
+MOPD_ITERATION
+MOPD_ITERATION_DIR
+MOPD_TRAIN_MANIFEST
+MOPD_DATASET_ROOT
+MOPD_TEACHER_REGISTRY
+```
+
+外部命令不通过 shell 执行。中断后使用相同参数加 `--resume`；已经成功的训练或后处理阶段
+不会重复运行。锁文件防止同一 iteration 被两个进程同时执行。
+
+调度器不会自动进行真机 rollout，也不会绕过人工安全确认。student rollout 完成并保存后，
+它只负责离线数据与训练阶段。
+
+## 第一次正式实验
+
+1. 三个 teacher 都从服务端公开并通过 checkpoint 身份校验。
+2. 三个任务各采集一批 student rollout。
+3. teacher 保持冻结，student 从三者共同祖先 checkpoint 初始化。
+4. 蒸馏样本与 replay 从 1:1 或 1:2 起步。
+5. 使用独立 held-out rollout 与真机任务成功率比较：
+   - 混合 SFT；
    - 参数平均；
-   - multi-policy on-policy 蒸馏加 replay。
+   - continuous-action MOPD 加 replay。
+6. eval 不得复用训练的同一批 8 帧。
 
-在实现并验证 teacher/student 连续动作评分接口和 flow 分布差异之前，不应把当前结果称为
-严格的 reverse-KL MOPD。当前版本是可直接接入 LingBot 连续动作训练的工程化近似方案。
+在实现 teacher/student 连续动作评分接口和 flow 分布 divergence 前，实验报告必须继续标注
+为“continuous-action MOPD approximation”，不能宣称是严格 reverse-KL MOPD。

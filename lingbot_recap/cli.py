@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 from pathlib import Path
 
 from .cameras import CameraConfig, OpenCVCameraRig
@@ -9,7 +10,8 @@ from .hardware import SO101BusArm
 from .inputs import CompositeEventSource, KeyboardEventSource, LinuxTwoButtonEventSource
 from .journal import ExperienceJournal
 from .lerobot_export import export_lerobot_distillation_dataset
-from .multi_policy import MultiPolicyRouter
+from .multi_policy import MultiPolicyRouter, sha256_file
+from .orchestrator import IterationConfig, IterationRunner
 from .policy import LingBotHTTPPolicy
 from .runtime import CollectorConfig, ExperienceCollector
 
@@ -63,6 +65,12 @@ def validate_teachers(args) -> None:
         print(f"READY {key}: {health}")
 
 
+def fingerprint(args) -> None:
+    for value in args.files:
+        path = Path(value).resolve()
+        print(f"{sha256_file(path)}  {path}")
+
+
 def relabel(args) -> None:
     router = MultiPolicyRouter.from_file(args.teacher_registry)
     allowed_sources = ["lingbot_policy"]
@@ -84,8 +92,9 @@ def relabel(args) -> None:
         raise SystemExit("no RECAP experiences found")
     for episode in episodes:
         summary = relabeler.label_episode(episode, overwrite=args.overwrite)
+        mode = "PREVIEW" if summary.preview else "LABELED"
         print(
-            f"LABELED {summary.episode} teacher={summary.teacher_key} "
+            f"{mode} {summary.episode} teacher={summary.teacher_key} "
             f"frames={summary.labeled_frames} skipped={summary.skipped_frames}"
         )
 
@@ -111,8 +120,30 @@ def export_distill(args) -> None:
     )
 
 
+def run_iteration(args) -> None:
+    config = IterationConfig(
+        iteration=args.iteration,
+        teacher_registry=Path(args.teacher_registry),
+        experience_root=Path(args.experience_root),
+        run_root=Path(args.run_root),
+        repo_id=args.repo_id,
+        replay_manifest=Path(args.replay_manifest) if args.replay_manifest else None,
+        replay_repeat=args.replay_repeat,
+        use_videos=not args.no_videos,
+        min_segment_frames=args.min_segment_frames,
+        train_command=tuple(shlex.split(args.train_command)) if args.train_command else (),
+        post_train_command=(
+            tuple(shlex.split(args.post_train_command))
+            if args.post_train_command
+            else ()
+        ),
+    )
+    path = IterationRunner(config).run(resume=args.resume)
+    print(f"ITERATION COMPLETE {path}")
+
+
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(prog="lingbot-recap")
+    root = argparse.ArgumentParser(prog="lingbot-mopd")
     commands = root.add_subparsers(dest="command", required=True)
     run = commands.add_parser("collect")
     run.set_defaults(func=collect)
@@ -148,6 +179,10 @@ def parser() -> argparse.ArgumentParser:
     teachers.set_defaults(func=validate_teachers)
     teachers.add_argument("--teacher-registry", required=True)
 
+    hashes = commands.add_parser("fingerprint")
+    hashes.set_defaults(func=fingerprint)
+    hashes.add_argument("files", nargs="+")
+
     labels = commands.add_parser("relabel")
     labels.set_defaults(func=relabel)
     labels.add_argument("--teacher-registry", required=True)
@@ -166,6 +201,21 @@ def parser() -> argparse.ArgumentParser:
     export.add_argument("--repo-id", default="mzm/lingbot_recap_distillation")
     export.add_argument("--min-segment-frames", type=int, default=2)
     export.add_argument("--no-videos", action="store_true")
+
+    iteration = commands.add_parser("run-iteration")
+    iteration.set_defaults(func=run_iteration)
+    iteration.add_argument("--iteration", required=True, type=int)
+    iteration.add_argument("--teacher-registry", required=True)
+    iteration.add_argument("--experience-root", required=True)
+    iteration.add_argument("--run-root", required=True)
+    iteration.add_argument("--repo-id", required=True)
+    iteration.add_argument("--replay-manifest")
+    iteration.add_argument("--replay-repeat", type=int, default=1)
+    iteration.add_argument("--min-segment-frames", type=int, default=2)
+    iteration.add_argument("--no-videos", action="store_true")
+    iteration.add_argument("--train-command")
+    iteration.add_argument("--post-train-command")
+    iteration.add_argument("--resume", action="store_true")
     return root
 
 

@@ -82,6 +82,7 @@ class RelabelSummary:
     labeled_frames: int
     skipped_frames: int
     output: Path
+    preview: bool
 
 
 class ExperienceRelabeler:
@@ -100,13 +101,38 @@ class ExperienceRelabeler:
         metadata = _read_json(metadata_path)
         task = str(metadata["task"])
         teacher = self.router.teacher_for(task)
-        output = episode / "teacher_labels.jsonl"
-        partial = episode / "teacher_labels.partial.jsonl"
-        meta_output = episode / "teacher_labels.meta.json"
+        contract = self.router.require_training_contract()
+        preview = self.config.max_frames is not None
+        label_stem = "teacher_labels.preview" if preview else "teacher_labels"
+        output = episode / f"{label_stem}.jsonl"
+        partial = episode / f"{label_stem}.partial.jsonl"
+        meta_output = episode / f"{label_stem}.meta.json"
 
         if output.exists() and not overwrite:
+            if not meta_output.exists():
+                raise RuntimeError(f"label metadata is missing for {output}")
+            existing_meta = _read_json(meta_output)
+            expected = {
+                "teacher_key": teacher.key,
+                "teacher_checkpoint": teacher.checkpoint,
+                "stride": self.config.stride,
+                "max_frames": self.config.max_frames,
+                "allowed_action_sources": list(self.config.allowed_action_sources),
+                "training_contract_id": contract.contract_id,
+                "preview": preview,
+            }
+            mismatches = {
+                key: (existing_meta.get(key), value)
+                for key, value in expected.items()
+                if existing_meta.get(key) != value
+            }
+            if mismatches:
+                raise RuntimeError(
+                    f"existing labels do not match requested configuration: {mismatches}; "
+                    "use --overwrite"
+                )
             count = sum(1 for _ in _iter_jsonl(output))
-            return RelabelSummary(episode, task, teacher.key, count, 0, output)
+            return RelabelSummary(episode, task, teacher.key, count, 0, output, preview)
         if overwrite:
             output.unlink(missing_ok=True)
             partial.unlink(missing_ok=True)
@@ -149,6 +175,11 @@ class ExperienceRelabeler:
                 state = _state_mapping(frame)
                 routed = self.router.infer(task, state, image_jpegs)
                 chunk = routed.result.chunk
+                if len(chunk) != routed.teacher.use_length:
+                    raise RuntimeError(
+                        f"teacher {routed.teacher.key!r} returned {len(chunk)} actions; "
+                        f"expected {routed.teacher.use_length}"
+                    )
                 row = {
                     "format": LABEL_FORMAT,
                     "frame_index": frame_index,
@@ -178,15 +209,20 @@ class ExperienceRelabeler:
                 "task": task,
                 "teacher_key": teacher.key,
                 "teacher_checkpoint": teacher.checkpoint,
+                "teacher_checkpoint_identity_verified": True,
                 "stride": self.config.stride,
+                "max_frames": self.config.max_frames,
                 "allowed_action_sources": list(self.config.allowed_action_sources),
                 "labeled_frames": labeled,
                 "skipped_frames": skipped,
+                "preview": preview,
+                "training_contract_id": contract.contract_id,
+                "training_contract": contract.to_mapping(),
                 "created_at_unix": time.time(),
                 "training_use": "MULTI_POLICY_ON_POLICY_DISTILLATION_ONLY",
             },
         )
-        return RelabelSummary(episode, task, teacher.key, labeled, skipped, output)
+        return RelabelSummary(episode, task, teacher.key, labeled, skipped, output, preview)
 
 
 def find_experiences(root: str | Path, include_partial: bool = False) -> list[Path]:

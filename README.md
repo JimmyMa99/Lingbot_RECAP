@@ -256,21 +256,23 @@ lingbot-recap audit \
 三个专项策略可以按任务作为 teacher，对通用 student 的真机 rollout 做离线动作重标注：
 
 ```bash
-lingbot-recap validate-teachers \
+lingbot-mopd validate-teachers \
   --teacher-registry configs/multi_policy_teachers.local.json
 
-lingbot-recap relabel \
+lingbot-mopd relabel \
   --teacher-registry configs/multi_policy_teachers.local.json \
   --experience-root /home/mzm/lerobot_data/recap_experience
 
-lingbot-recap export-distill \
+lingbot-mopd export-distill \
   --experience-root /home/mzm/lerobot_data/recap_experience \
   --output-root /home/mzm/lerobot_data/mopd_teacher_labeled_v1 \
   --repo-id mzm/lingbot_mopd_teacher_labeled_v1
 ```
 
-默认只重标注 student 自动控制状态，不把人工接管动作混入。导出器会把接管形成的时间间隙拆成
-独立 episode，防止 LingBot 的未来 action chunk 跨过控制权切换。完整设计、局限与训练配方见
+注册表 v2 会强制校验服务实际加载的 checkpoint，并用 SHA-256 锁定 normalization stats、
+robot config、相机映射与动作空间。默认只重标注 student 自动控制状态，不把人工接管动作
+混入。导出器会把接管形成的时间间隙拆成独立 episode，防止 LingBot 的未来 action chunk
+跨过控制权切换；`run-iteration` 可恢复地串联标注、导出、replay 混合与训练。完整设计见
 [docs/MULTI_POLICY_DISTILLATION.md](docs/MULTI_POLICY_DISTILLATION.md)。
 
 ## 代码结构
@@ -286,6 +288,7 @@ lingbot_recap/
   multi_policy.py 任务到专项 teacher 的安全路由
   distillation.py student experience 离线 teacher 重标注
   lerobot_export.py teacher action 导出为 LeRobot v3 数据集
+  orchestrator.py 可恢复的离线 MOPD 迭代调度
   journal.py     追加式、可恢复 experience 记录
   runtime.py     采集调度循环
 tools/

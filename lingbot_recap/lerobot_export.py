@@ -73,26 +73,52 @@ def export_lerobot_distillation_dataset(
     source_fps = None
     source_stride = None
     first_image_shape = None
+    training_contract_id = None
+    training_contract = None
+    eligible_segment_count = 0
     for episode in experience_paths:
         metadata, pairs = load_labeled_frames(episode)
         label_meta = json.loads((episode / "teacher_labels.meta.json").read_text(encoding="utf-8"))
+        if label_meta.get("preview"):
+            raise ValueError(f"preview labels cannot be exported for training: {episode}")
+        if label_meta.get("teacher_checkpoint_identity_verified") is not True:
+            raise ValueError(f"teacher checkpoint identity was not verified: {episode}")
+        contract_id = str(label_meta.get("training_contract_id", ""))
+        contract = label_meta.get("training_contract")
+        if not contract_id or not isinstance(contract, dict):
+            raise ValueError(f"training contract metadata is missing: {episode}")
+        if training_contract_id is None:
+            training_contract_id = contract_id
+            training_contract = contract
+        elif contract_id != training_contract_id or contract != training_contract:
+            raise ValueError("all experiences must use the same training contract")
         fps = float(metadata.get("fps", 30.0))
         stride = int(label_meta.get("stride", 1))
         if source_fps is None:
             source_fps, source_stride = fps, stride
         elif (fps, stride) != (source_fps, source_stride):
             raise ValueError("all experiences must use the same fps and relabel stride")
-        if pairs and first_image_shape is None:
-            first_frame = pairs[0][0]
+        segments = [
+            segment
+            for segment in _segments(pairs, stride)
+            if len(segment) >= min_segment_frames
+        ]
+        eligible_segment_count += len(segments)
+        if segments and first_image_shape is None:
+            first_frame = segments[0][0][0]
             first_image_shape = _read_rgb(episode / first_frame["images"]["top"]).shape
-        loaded.append((episode, metadata, pairs))
+        loaded.append((episode, metadata, segments))
 
     assert source_fps is not None and source_stride is not None
     effective_fps = source_fps / source_stride
     if abs(effective_fps - round(effective_fps)) > 1e-6:
         raise ValueError(f"effective fps must be an integer, got {effective_fps}")
     if first_image_shape is None:
-        raise RuntimeError("no labeled frames found")
+        raise RuntimeError(
+            f"no labeled segment contains at least {min_segment_frames} frames"
+        )
+    if eligible_segment_count == 0:
+        raise RuntimeError("no eligible labeled segments found")
     height, width, channels = first_image_shape
     image_dtype = "video" if use_videos else "image"
     joint_names = list(MOTOR_NAMES)
@@ -131,11 +157,16 @@ def export_lerobot_distillation_dataset(
     output_episodes = 0
     output_frames = 0
     provenance_episodes = []
-    for episode, metadata, pairs in loaded:
-        for segment in _segments(pairs, source_stride):
-            if len(segment) < min_segment_frames:
-                continue
+    for episode, metadata, segments in loaded:
+        for segment in segments:
+            segment_teacher = segment[0][1]["teacher_key"]
+            segment_checkpoint = segment[0][1]["teacher_checkpoint"]
             for frame, label in segment:
+                if (
+                    label.get("teacher_key") != segment_teacher
+                    or label.get("teacher_checkpoint") != segment_checkpoint
+                ):
+                    raise ValueError(f"teacher identity changes within segment in {episode}")
                 state = frame["observation"]["state"]
                 if isinstance(state, dict):
                     state_values = [float(state[name]) for name in MOTOR_NAMES]
@@ -144,6 +175,8 @@ def export_lerobot_distillation_dataset(
                 action = [float(value) for value in label["teacher_action"]]
                 if len(state_values) != 6 or len(action) != 6:
                     raise ValueError(f"invalid state/action dimensions in {episode}")
+                if not np.isfinite(state_values).all() or not np.isfinite(action).all():
+                    raise ValueError(f"state/action contains NaN or Inf in {episode}")
                 dataset.add_frame(
                     {
                         "observation.state": np.asarray(state_values, dtype=np.float32),
@@ -163,8 +196,8 @@ def export_lerobot_distillation_dataset(
                     "source_last_frame": int(segment[-1][0]["frame_index"]),
                     "frames": len(segment),
                     "task": metadata["task"],
-                    "teacher_key": segment[0][1]["teacher_key"],
-                    "teacher_checkpoint": segment[0][1]["teacher_checkpoint"],
+                    "teacher_key": segment_teacher,
+                    "teacher_checkpoint": segment_checkpoint,
                 }
             )
 
@@ -176,6 +209,8 @@ def export_lerobot_distillation_dataset(
         "source_fps": source_fps,
         "source_stride": source_stride,
         "effective_fps": effective_fps,
+        "training_contract_id": training_contract_id,
+        "training_contract": training_contract,
         "source_experiences": len(experience_paths),
         "output_episodes": output_episodes,
         "output_frames": output_frames,
