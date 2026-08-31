@@ -1,11 +1,12 @@
-# Lingbot_RECAP
+# LingBot MOPD
 
-Lingbot_RECAP 是面向 LingBot-VLA 与 SO-101 的安全人工介入数据采集系统。它在策略 rollout
-过程中检测来回振荡和无进展；操作员也可以主动请求接管。系统会先保持 follower，再让
-leader 缓慢对齐 follower，确认对齐后才允许卸掉 leader 力矩并开始人工遥操作。
+这是 `mopd` 实验分支，用于把多个 LingBot-VLA 专项策略蒸馏成一个通用策略。当前实现让
+student 先在真机访问状态，再按精确任务文本调用对应的冻结 teacher 进行离线动作重标注，
+最后导出可由 LingBot 连续动作 flow-matching 训练器直接使用的 LeRobot v3 数据集。
 
-项目会完整保留“策略失败 → 接管 → 人工纠正 → 任务结果”的经历，供后续 RECAP / 强化学习
-使用。数据默认带 `DO_NOT_ADD_TO_SFT` 标记，不会被误加进现有 SFT 数据清单。
+本分支复用 RECAP 的安全 rollout 与人工接管采集层，以完整保留“策略失败 → 接管 → 人工纠正
+→ 任务结果”的经历。原始 experience 默认带 `DO_NOT_ADD_TO_SFT` 标记，不会被误加进现有
+SFT 数据清单。
 
 > 这是研究原型，不是安全认证控制器。软件按键不能替代物理急停或电源开关。第一次真机
 > 测试前必须阅读 [安全约束](docs/SAFETY.md)。
@@ -24,9 +25,10 @@ leader 缓慢对齐 follower，确认对齐后才允许卸掉 leader 力矩并�
 - student rollout 可离线 teacher 重标注并导出为 LeRobot v3 蒸馏数据；
 - 终端键盘仍可作为两键设备的备用控制入口。
 
-当前仓库实现安全采集层，以及 multi-policy on-policy distillation 的第一阶段。完整 RECAP
-训练仍需单独实现 outcome reward、value model、时序 advantage 和 advantage-conditioned
-policy。多策略蒸馏说明见
+当前分支实现安全采集层，以及 multi-policy on-policy distillation 的第一阶段。它是适配
+LingBot 连续动作头的工程化近似，不是严格的 token-level reverse-KL MOPD。完整 RECAP 训练
+仍需单独实现 outcome reward、value model、时序 advantage 和 advantage-conditioned policy。
+多策略蒸馏说明见
 [Multi-policy on-policy 蒸馏说明](docs/MULTI_POLICY_DISTILLATION.md)。
 
 ## 硬件配置
