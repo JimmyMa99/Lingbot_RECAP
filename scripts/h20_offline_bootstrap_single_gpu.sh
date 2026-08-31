@@ -32,53 +32,59 @@ wait_health() {
   return 1
 }
 
-temporary_teacher_pid=""
-cleanup_teacher() {
-  if [[ -n "${temporary_teacher_pid}" ]]; then
-    kill "${temporary_teacher_pid}" 2>/dev/null || true
-    wait "${temporary_teacher_pid}" 2>/dev/null || true
-    temporary_teacher_pid=""
-  fi
+temporary_teacher_pids=()
+cleanup_teachers() {
+  local pid
+  for pid in "${temporary_teacher_pids[@]}"; do
+    kill "${pid}" 2>/dev/null || true
+  done
+  for pid in "${temporary_teacher_pids[@]}"; do
+    wait "${pid}" 2>/dev/null || true
+  done
+  temporary_teacher_pids=()
 }
-trap cleanup_teacher EXIT
+trap cleanup_teachers EXIT
 
 if ! wait_health 18007; then
   echo "yellow teacher on port 18007 is unavailable" >&2
   exit 1
 fi
-python -m lingbot_recap.cli relabel \
-  --teacher-registry "${REGISTRY}" \
-  --experience-root "${RUN}/experience/yellow" \
-  --include-offline-demonstrations
-
 start_teacher() {
   local checkpoint="$1" port="$2" log="$3"
-  cleanup_teacher
   cd "${BASE}/code/lingbot"
   CUDA_VISIBLE_DEVICES=7 python -u server_http.py \
     --model_path "${checkpoint}" --host 127.0.0.1 --port "${port}" --use_length 16 \
     >"${log}" 2>&1 &
-  temporary_teacher_pid="$!"
+  temporary_teacher_pids+=("$!")
   wait_health "${port}"
 }
 
 start_teacher \
   "${BASE}/checkpoints/newdata_yellow_beside_milk_from_good_ep8_aug_lr1e4_epoch30_merged_20260831" \
   18008 "${RUN}/logs/teacher_milk.log"
-python -m lingbot_recap.cli relabel \
-  --teacher-registry "${REGISTRY}" \
-  --experience-root "${RUN}/experience/milk" \
-  --include-offline-demonstrations
-cleanup_teacher
-
 start_teacher \
   "${BASE}/checkpoints/newdata_ducks_into_box_from_good_ep8_aug_lr1e4_epoch30_merged_20260831" \
   18009 "${RUN}/logs/teacher_box.log"
+
+python -m lingbot_recap.cli relabel \
+  --teacher-registry "${REGISTRY}" \
+  --experience-root "${RUN}/experience/yellow" \
+  --include-offline-demonstrations &
+yellow_label_pid="$!"
+python -m lingbot_recap.cli relabel \
+  --teacher-registry "${REGISTRY}" \
+  --experience-root "${RUN}/experience/milk" \
+  --include-offline-demonstrations &
+milk_label_pid="$!"
 python -m lingbot_recap.cli relabel \
   --teacher-registry "${REGISTRY}" \
   --experience-root "${RUN}/experience/box" \
-  --include-offline-demonstrations
-cleanup_teacher
+  --include-offline-demonstrations &
+box_label_pid="$!"
+wait "${yellow_label_pid}"
+wait "${milk_label_pid}"
+wait "${box_label_pid}"
+cleanup_teachers
 
 mkdir -p "${RUN}/experience/all"
 for task_root in yellow milk box; do
