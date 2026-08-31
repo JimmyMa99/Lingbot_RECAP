@@ -11,6 +11,9 @@
 | `journal` | durable experience records | add data to SFT manifests |
 | `policy` | LingBot HTTP requests | write motor commands |
 | `runtime` | scheduling modules at control frequency | bypass handoff authority |
+| `multi_policy` | exact task-to-teacher routing | guess or fuzzily match a task |
+| `distillation` | offline teacher labeling of stored states | enter the robot control loop |
+| `lerobot_export` | derived teacher-action datasets | mutate source RECAP experiences |
 
 ## State transitions
 
@@ -49,3 +52,6 @@ The collector records all policy, intervention and outcome data. A separate futu
 5. construct advantage-conditioned LingBot examples.
 
 No component in this repository's collection runtime mutates existing LingBot SFT manifests.
+Multi-policy distillation is a separate offline pipeline: route stored student states to a frozen teacher,
+write crash-resumable sidecar labels, split contiguous policy-controlled segments, and export a derived
+LeRobot dataset. The normal LingBot trainer then mixes that dataset with explicit replay data.

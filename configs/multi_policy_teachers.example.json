@@ -1,0 +1,32 @@
+{
+  "format": "lingbot_multi_policy_registry_v1",
+  "teachers": [
+    {
+      "key": "pick_yellow",
+      "checkpoint": "/path/to/pick_yellow_epoch30_merged",
+      "server": "http://127.0.0.1:18007",
+      "use_length": 16,
+      "tasks": [
+        "夹起黄色鸭子"
+      ]
+    },
+    {
+      "key": "yellow_beside_milk",
+      "checkpoint": "/path/to/yellow_beside_milk_epoch30_merged",
+      "server": "http://127.0.0.1:18008",
+      "use_length": 16,
+      "tasks": [
+        "把黄色鸭子放到牛奶盒旁边"
+      ]
+    },
+    {
+      "key": "ducks_into_box",
+      "checkpoint": "/path/to/ducks_into_box_epoch30_merged",
+      "server": "http://127.0.0.1:18009",
+      "use_length": 16,
+      "tasks": [
+        "把鸭子收拾到箱子里"
+      ]
+    }
+  ]
+}

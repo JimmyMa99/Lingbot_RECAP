@@ -4,9 +4,12 @@ import argparse
 from pathlib import Path
 
 from .cameras import CameraConfig, OpenCVCameraRig
+from .distillation import ExperienceRelabeler, RelabelConfig, find_experiences
 from .hardware import SO101BusArm
 from .inputs import CompositeEventSource, KeyboardEventSource, LinuxTwoButtonEventSource
 from .journal import ExperienceJournal
+from .lerobot_export import export_lerobot_distillation_dataset
+from .multi_policy import MultiPolicyRouter
 from .policy import LingBotHTTPPolicy
 from .runtime import CollectorConfig, ExperienceCollector
 
@@ -54,6 +57,60 @@ def audit(args) -> None:
         print(f"RECOVERABLE {path}")
 
 
+def validate_teachers(args) -> None:
+    router = MultiPolicyRouter.from_file(args.teacher_registry)
+    for key, health in router.validate_health().items():
+        print(f"READY {key}: {health}")
+
+
+def relabel(args) -> None:
+    router = MultiPolicyRouter.from_file(args.teacher_registry)
+    allowed_sources = ["lingbot_policy"]
+    if args.include_human_states:
+        allowed_sources.append("human_intervention")
+    relabeler = ExperienceRelabeler(
+        router,
+        RelabelConfig(
+            stride=args.stride,
+            max_frames=args.max_frames,
+            allowed_action_sources=tuple(allowed_sources),
+        ),
+    )
+    if args.episode:
+        episodes = [Path(args.episode)]
+    else:
+        episodes = find_experiences(args.experience_root, include_partial=args.include_partial)
+    if not episodes:
+        raise SystemExit("no RECAP experiences found")
+    for episode in episodes:
+        summary = relabeler.label_episode(episode, overwrite=args.overwrite)
+        print(
+            f"LABELED {summary.episode} teacher={summary.teacher_key} "
+            f"frames={summary.labeled_frames} skipped={summary.skipped_frames}"
+        )
+
+
+def export_distill(args) -> None:
+    episodes = [
+        path
+        for path in find_experiences(args.experience_root, include_partial=False)
+        if (path / "teacher_labels.jsonl").exists()
+    ]
+    if not episodes:
+        raise SystemExit("no completed, teacher-labeled experiences found")
+    summary = export_lerobot_distillation_dataset(
+        episodes,
+        args.output_root,
+        args.repo_id,
+        use_videos=not args.no_videos,
+        min_segment_frames=args.min_segment_frames,
+    )
+    print(
+        f"EXPORTED {summary.output_root} experiences={summary.source_experiences} "
+        f"episodes={summary.output_episodes} frames={summary.output_frames}"
+    )
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="lingbot-recap")
     commands = root.add_subparsers(dest="command", required=True)
@@ -86,6 +143,29 @@ def parser() -> argparse.ArgumentParser:
     check = commands.add_parser("audit")
     check.set_defaults(func=audit)
     check.add_argument("--experience-root", default="/home/mzm/lerobot_data/recap_experience")
+
+    teachers = commands.add_parser("validate-teachers")
+    teachers.set_defaults(func=validate_teachers)
+    teachers.add_argument("--teacher-registry", required=True)
+
+    labels = commands.add_parser("relabel")
+    labels.set_defaults(func=relabel)
+    labels.add_argument("--teacher-registry", required=True)
+    labels.add_argument("--experience-root", default="/home/mzm/lerobot_data/recap_experience")
+    labels.add_argument("--episode", help="label one .complete/.partial experience directory")
+    labels.add_argument("--stride", type=int, default=1)
+    labels.add_argument("--max-frames", type=int)
+    labels.add_argument("--include-human-states", action="store_true")
+    labels.add_argument("--include-partial", action="store_true")
+    labels.add_argument("--overwrite", action="store_true")
+
+    export = commands.add_parser("export-distill")
+    export.set_defaults(func=export_distill)
+    export.add_argument("--experience-root", default="/home/mzm/lerobot_data/recap_experience")
+    export.add_argument("--output-root", required=True)
+    export.add_argument("--repo-id", default="mzm/lingbot_recap_distillation")
+    export.add_argument("--min-segment-frames", type=int, default=2)
+    export.add_argument("--no-videos", action="store_true")
     return root
 
 
