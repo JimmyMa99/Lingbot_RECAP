@@ -98,7 +98,9 @@ class VisualTokenBottleneck(nn.Module):
         if token.shape != (embeddings.shape[0], self.config.token_dim):
             raise ValueError(f"RL token 合同不匹配: {tuple(token.shape)}")
         length = embeddings.shape[1]
-        target = self.input_projection(embeddings) + self.decoder_positions[:, :length]
+        # Learned queries may use only the compressed token. Feeding embeddings
+        # here would create a bypass that reconstructs without the 512D bottleneck.
+        target = self.decoder_positions[:, :length].expand(embeddings.shape[0], -1, -1)
         memory = token[:, None]
         causal = torch.triu(
             torch.ones((length, length), dtype=torch.bool, device=embeddings.device), diagonal=1
@@ -109,6 +111,9 @@ class VisualTokenBottleneck(nn.Module):
     def reconstruct(self, embeddings: torch.Tensor, valid: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         token = self.encode(embeddings, valid)
         return self.decode_from_token(token, embeddings), token
+
+    def forward(self, embeddings: torch.Tensor, valid: torch.Tensor) -> dict[str, torch.Tensor]:
+        return self.reconstruction_loss(embeddings, valid)
 
     def reconstruction_loss(self, embeddings: torch.Tensor, valid: torch.Tensor) -> dict[str, torch.Tensor]:
         prediction, token = self.reconstruct(embeddings, valid)
