@@ -57,7 +57,7 @@ def load_phase(encoded_root: Path, auto_root: Path, phase: str, held_out: set[st
 
 
 @torch.inference_mode()
-def evaluate(model, dataset, device, limit):
+def evaluate(model, dataset, device, limits):
     loader = DataLoader(dataset, batch_size=256, shuffle=False)
     sums = {"loss": 0.0, "pred_mae": 0.0, "teacher_mae": 0.0, "count": 0}
     auto_residual, human_cosine = [], []
@@ -65,7 +65,8 @@ def evaluate(model, dataset, device, limit):
     for state, reference, action, intervention in loader:
         state, reference, action = state.to(device), reference.to(device), action.to(device)
         predicted = model.mean(state, reference)
-        target = torch.clamp(reference + torch.clamp(action - reference, -limit, limit), -1, 1)
+        delta = action - reference
+        target = torch.clamp(reference + torch.maximum(torch.minimum(delta, limits), -limits), -1, 1)
         count = len(state)
         sums["loss"] += float(F.smooth_l1_loss(predicted, target, reduction="sum"))
         sums["pred_mae"] += float((predicted - action).abs().sum())
@@ -98,6 +99,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--residual-limit", type=float, default=.20)
+    parser.add_argument("--gripper-residual-limit", type=float, default=.60)
     parser.add_argument("--seed", type=int, default=20260906)
     args = parser.parse_args()
     random.seed(args.seed); np.random.seed(args.seed); torch.manual_seed(args.seed)
@@ -120,8 +122,17 @@ def main() -> None:
             loader = DataLoader(train_set, batch_size=args.batch_size, sampler=sampler)
         else:
             loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True)
-        config = OnlineRLConfig(residual_limit=args.residual_limit, reference_dropout=.25)
+        config = OnlineRLConfig(
+            residual_limit=args.residual_limit,
+            gripper_residual_limit=args.gripper_residual_limit,
+            reference_dropout=.25,
+        )
         model = ResidualChunkActor(config).to(device)
+        limits = torch.tensor(
+            [args.residual_limit] * 5 + [args.gripper_residual_limit],
+            dtype=torch.float32,
+            device=device,
+        )
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=args.lr * .1)
         phase_root = args.output_root / phase
@@ -132,9 +143,9 @@ def main() -> None:
             model.train(); loss_sum = 0.0; count = 0
             for state, reference, action, _intervention in loader:
                 state, reference, action = state.to(device), reference.to(device), action.to(device)
+                delta = action - reference
                 target = torch.clamp(
-                    reference + torch.clamp(action - reference, -args.residual_limit, args.residual_limit),
-                    -1, 1,
+                    reference + torch.maximum(torch.minimum(delta, limits), -limits), -1, 1
                 )
                 predicted = model.mean(state, reference, apply_reference_dropout=True)
                 loss = F.smooth_l1_loss(predicted, target)
@@ -148,7 +159,7 @@ def main() -> None:
             scheduler.step()
             metrics = {
                 "epoch": epoch, "train_loss": loss_sum / count,
-                **{f"val_{k}": v for k, v in evaluate(model, val_set, device, args.residual_limit).items()},
+                **{f"val_{k}": v for k, v in evaluate(model, val_set, device, limits).items()},
                 "lr": optimizer.param_groups[0]["lr"], "train_samples": len(train_set),
                 "val_samples": len(val_set), "all_finite": True,
             }

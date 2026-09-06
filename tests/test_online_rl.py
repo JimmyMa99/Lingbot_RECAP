@@ -6,6 +6,7 @@ torch = pytest.importorskip("torch")
 from lingbot_recap.online_rl import (  # noqa: E402
     OnlineRLAgent,
     OnlineRLConfig,
+    ResidualChunkActor,
     SO101ActionCodec,
     sparse_terminal_rewards,
 )
@@ -40,6 +41,21 @@ def test_actor_starts_exactly_at_frozen_reference():
     action, mean = agent.act(state, reference, explore=False)
     np.testing.assert_array_equal(action, reference)
     np.testing.assert_array_equal(mean, reference)
+
+
+def test_actor_supports_independent_gripper_residual_limit():
+    config = OnlineRLConfig(
+        feature_dim=8, chunk_size=4, hidden_dim=16,
+        residual_limit=.2, gripper_residual_limit=.6,
+    )
+    actor = ResidualChunkActor(config)
+    with torch.no_grad():
+        actor.net[-1].bias.fill_(10.0)
+    state = torch.zeros(1, config.state_dim)
+    reference = torch.zeros(1, config.chunk_size, config.action_dim)
+    delta = actor.mean(state, reference) - reference
+    torch.testing.assert_close(delta[..., :5], torch.full_like(delta[..., :5], .2))
+    torch.testing.assert_close(delta[..., 5], torch.full_like(delta[..., 5], .6))
 
 
 def test_training_step_is_finite():

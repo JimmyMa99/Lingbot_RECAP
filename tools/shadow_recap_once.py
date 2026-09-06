@@ -39,7 +39,19 @@ def main() -> None:
         )
         response.raise_for_status()
         payload = response.json()
-        print(json.dumps({"state": state, "recap": payload["recap"], "action_shape": [len(payload["action"]["action"]), 6]}, ensure_ascii=False, indent=2))
+        actions = payload["action"]["action"]
+        gripper = [row[5] for row in actions]
+        print(json.dumps({
+            "state": state,
+            "recap": payload["recap"],
+            "action_shape": [len(actions), 6],
+            "gripper_action": {
+                "first": gripper[0],
+                "last": gripper[-1],
+                "min": min(gripper),
+                "max": max(gripper),
+            },
+        }, ensure_ascii=False, indent=2))
     finally:
         cameras.disconnect()
         arm.disconnect(disable_torque=False)

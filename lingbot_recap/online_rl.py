@@ -34,6 +34,7 @@ class OnlineRLConfig:
     exploration_std: float = 0.03
     reference_dropout: float = 0.5
     residual_limit: float = 0.05
+    gripper_residual_limit: float | None = None
     batch_size: int = 256
     policy_delay: int = 2
     replay_capacity: int = 100_000
@@ -62,6 +63,11 @@ class OnlineRLConfig:
             raise ValueError("reference_dropout 必须在 [0, 1] 内")
         if not 0.0 <= self.residual_limit <= 1.0:
             raise ValueError("residual_limit 必须在 [0, 1] 内")
+        if self.gripper_residual_limit is not None:
+            if self.action_dim != 6:
+                raise ValueError("独立夹爪 residual limit 仅支持 6 维 SO-101 动作")
+            if not 0.0 <= self.gripper_residual_limit <= 1.0:
+                raise ValueError("gripper_residual_limit 必须在 [0, 1] 内")
 
     @property
     def state_dim(self) -> int:
@@ -178,9 +184,17 @@ class ResidualChunkActor(nn.Module):
                 >= self.config.reference_dropout
             )
             network_reference = network_reference * keep
-        raw = self.net(torch.cat((self._state(state), network_reference), dim=-1))
-        residual = torch.tanh(raw) * self.config.residual_limit
-        return torch.clamp(flat_reference + residual, -1.0, 1.0).reshape_as(reference)
+        raw = self.net(torch.cat((self._state(state), network_reference), dim=-1)).reshape_as(reference)
+        gripper_limit = (
+            self.config.residual_limit
+            if self.config.gripper_residual_limit is None
+            else self.config.gripper_residual_limit
+        )
+        limits = raw.new_tensor(
+            [self.config.residual_limit] * (self.config.action_dim - 1) + [gripper_limit]
+        )
+        residual = torch.tanh(raw) * limits
+        return torch.clamp(reference + residual, -1.0, 1.0)
 
     def sample(
         self,

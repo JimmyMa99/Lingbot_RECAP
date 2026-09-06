@@ -48,11 +48,16 @@ def main() -> None:
     parser.add_argument("--bottleneck", type=Path, required=True)
     parser.add_argument("--residual-root", type=Path, required=True)
     parser.add_argument("--residual-scale", type=float, default=0.25)
+    parser.add_argument("--gripper-scale", type=float)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8011)
     args = parser.parse_args()
     if not 0.0 <= args.residual_scale <= 1.0:
         raise SystemExit("residual-scale must be in [0, 1]")
+    if args.gripper_scale is None:
+        args.gripper_scale = args.residual_scale
+    if not 0.0 <= args.gripper_scale <= 1.0:
+        raise SystemExit("gripper-scale must be in [0, 1]")
 
     os.environ["LINGBOT_TRAINING_CONFIG"] = str(args.training_config.resolve())
     sys.path.insert(0, str(args.lingbot_root.resolve()))
@@ -108,7 +113,9 @@ def main() -> None:
     def health():
         return {
             "status": "ok", "model_loaded": True, "phase": runtime["phase"],
-            "residual_scale": args.residual_scale, "residual_limit": config.residual_limit,
+            "residual_scale": args.residual_scale, "gripper_scale": args.gripper_scale,
+            "residual_limit": config.residual_limit,
+            "gripper_residual_limit": config.gripper_residual_limit,
             "exploration": False, "checkpoint": str(args.residual_root),
         }
 
@@ -174,18 +181,27 @@ def main() -> None:
                 torch.from_numpy(reference[None]).to(device),
             )[0].cpu().numpy()
         residual = predicted - reference
-        normalized = np.clip(reference + args.residual_scale * residual, -1.0, 1.0)
+        scales = np.asarray([args.residual_scale] * 5 + [args.gripper_scale], dtype=np.float32)
+        normalized = np.clip(reference + scales * residual, -1.0, 1.0)
         physical = SO101ActionCodec.denormalize(normalized)
-        if not np.isfinite(physical).all() or np.abs(residual).max() > config.residual_limit + 1e-5:
+        gripper_limit = (
+            config.residual_limit
+            if config.gripper_residual_limit is None
+            else config.gripper_residual_limit
+        )
+        limits = np.asarray([config.residual_limit] * 5 + [gripper_limit], dtype=np.float32)
+        if not np.isfinite(physical).all() or np.any(np.abs(residual) > limits + 1e-5):
             raise FloatingPointError("residual policy safety contract failed")
         return {
             "action": {"action": physical.tolist()},
             "server_timing_ms": round((time.perf_counter() - started) * 1000, 1),
             "recap": {
                 "phase": phase, "residual_scale": args.residual_scale,
+                "gripper_scale": args.gripper_scale,
                 "residual_abs_mean": float(np.abs(residual).mean()),
                 "residual_abs_max": float(np.abs(residual).max()),
-                "scaled_residual_abs_max": float(np.abs(args.residual_scale * residual).max()),
+                "arm_scaled_residual_abs_max": float(np.abs(args.residual_scale * residual[..., :5]).max()),
+                "gripper_scaled_residual_abs_max": float(np.abs(args.gripper_scale * residual[..., 5]).max()),
                 "all_finite": True,
             },
         }
