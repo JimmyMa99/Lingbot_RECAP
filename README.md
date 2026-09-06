@@ -22,8 +22,10 @@ leader 缓慢对齐 follower，确认对齐后才允许卸掉 leader 力矩并�
 - 崩溃后保留 `.partial` 目录，可审计、恢复，不浪费 rollout；
 - 终端键盘仍可作为两键设备的备用控制入口。
 
-当前仓库实现的是安全采集层。完整 RECAP 训练仍需单独实现 outcome reward、value model、
-时序 advantage 和 advantage-conditioned policy。
+`recap-rlt` 分支正在实现在线强化学习层：冻结 LingBot，用纯 PyTorch residual actor、
+twin critic 和可恢复 replay 学习人工纠正轨迹。设计、迁移边界和上线门槛见
+[LingBot RECAP 在线强化学习设计](docs/LINGBOT_RLT.md)。该分支不依赖 OpenPI/JAX，且在
+held-shadow 与 warmup 门槛通过前不会把 RL 动作发送给真机。
 
 多策略 on-policy 蒸馏属于另一条实验路线，代码与使用文档位于 `mopd` 分支，不放在
 RECAP 的 `main` 分支中。
