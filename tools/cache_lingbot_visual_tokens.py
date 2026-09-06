@@ -55,6 +55,8 @@ def main() -> None:
         use_fp32=False,
         use_compile=False,
     )
+    # 官方 reset() 仍以当前工作目录解析 configs/robot_configs。
+    os.chdir(args.lingbot_root)
     server.reset(args.robot)
     data_config = SimpleNamespace(**vars(server.data_config))
     data_config.train_path = str(args.data_manifest)
