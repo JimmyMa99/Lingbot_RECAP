@@ -33,8 +33,12 @@ class ResidualDataset(Dataset):
 
 def load_phase(encoded_root: Path, auto_root: Path, phase: str, held_out: set[str]):
     splits = {"train": [[], [], [], []], "val": [[], [], [], []]}
+    successful_episodes = set()
     for metadata_path in sorted(encoded_root.glob("shard_*/episode_*.complete.json")):
         metadata = json.loads(metadata_path.read_text())
+        if metadata.get("outcome") != "success":
+            continue
+        successful_episodes.add(metadata["episode"])
         split = "val" if metadata["episode"] in held_out else "train"
         with np.load(metadata_path.parent / metadata["phases"][phase]["file"], allow_pickle=False) as value:
             count = len(value["state"])
@@ -44,6 +48,8 @@ def load_phase(encoded_root: Path, auto_root: Path, phase: str, held_out: set[st
     if phase == "grasp":
         for metadata_path in sorted(auto_root.glob("shard_*/episode_*.complete.auto.json")):
             metadata = json.loads(metadata_path.read_text())
+            if metadata["episode"] not in successful_episodes:
+                continue
             split = "val" if metadata["episode"] in held_out else "train"
             with np.load(metadata_path.parent / metadata["file"], allow_pickle=False) as value:
                 count = len(value["state"])
