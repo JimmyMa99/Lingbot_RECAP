@@ -159,6 +159,30 @@ python tools/identify_two_key_keyboard.py \
 
 ## 录制人工参与数据
 
+### 当前操作机一键启动（吸管放入杯子）
+
+当前操作机已经固定好串口、相机、8010 隧道和三键 Y03 配置。重新 SSH 登录后执行：
+
+```bash
+cd /home/mzm/code/Lingbot_RECAP_rlt
+bash tools/start_recap_straw_cup.sh
+```
+
+脚本每次运行采集一个 episode，并在
+`/home/mzm/lerobot_data/recap_straw_into_cup/` 下创建新的时间戳目录，因此同一个启动命令可以
+重复使用。当前固定输入为 top=`/dev/video2`、wrist=`/dev/video1`。
+
+三键映射如下：
+
+- 按键 1：立即暂停策略、保持 follower，并让 leader 缓慢对齐；
+- 按键 2：对齐完成后确认卸掉 leader 力矩，进入人工接管；
+- 按键 3：任务成功，保存并结束本条 episode；
+- 终端 `F`：任务失败，保存并结束；
+- 终端 `Q`/`Esc`：放弃本次运行，但保留 partial 数据。
+
+启动脚本会先检查推理服务、设备文件、键盘权限和串口占用。它不会代替物理急停；执行前必须
+清空 follower 周围的人员和障碍物，并保证机械臂电源开关可以立即触达。
+
 ### 1. 启动前检查
 
 先确认 LingBot 服务已经加载目标权重：
