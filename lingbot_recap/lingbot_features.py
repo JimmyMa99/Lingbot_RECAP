@@ -13,6 +13,8 @@ from typing import Any
 import numpy as np
 import torch
 
+from .online_rl import SO101ActionCodec
+
 
 @dataclass(frozen=True)
 class LingBotReferenceFeatures:
@@ -29,7 +31,7 @@ class LingBotVisualTokenCapture:
         self._lock = threading.Lock()
         self._captured: torch.Tensor | None = None
 
-    def _hook(self, _module, _args, kwargs, output) -> None:
+    def _capture(self, kwargs, output) -> None:
         if not isinstance(output, tuple) or not output:
             return
         branches = output[0]
@@ -60,19 +62,40 @@ class LingBotVisualTokenCapture:
         with self._lock:
             self._captured = None
             target = self.server.vla.model.qwenvl_with_expert
-            handle = target.register_forward_hook(self._hook, with_kwargs=True)
+            if getattr(self.server, "use_compile", False):
+                raise RuntimeError("视觉 token 捕获要求 LingBot use_compile=False")
+            original_forward = target.forward
+
+            def wrapped_forward(*args, **kwargs):
+                output = original_forward(*args, **kwargs)
+                self._capture(kwargs, output)
+                return output
+
+            target.forward = wrapped_forward
             try:
                 action = self.server.infer(observation, return_normalized=True)
             finally:
-                handle.remove()
+                target.forward = original_forward
             if self._captured is None:
                 raise RuntimeError("未捕获到 LingBot prefix 视觉 token")
-            normalized = action.pop("_normalized_actions", None)
-            if normalized is None:
-                raise RuntimeError("LingBot 服务未返回 normalized action chunk")
-            normalized_np = np.asarray(normalized, dtype=np.float32)
-            if normalized_np.ndim != 2 or not np.isfinite(normalized_np).all():
-                raise RuntimeError(f"normalized action 合同不匹配: {normalized_np.shape}")
+            # LingBot 的内部 normalized action 是 max_action_dim=55 的填充空间。
+            # residual learner 必须使用实际 SO-101 六维动作，不能直接拿那 55 维张量。
+            action.pop("_normalized_actions", None)
+            if "action" in action:
+                physical = np.asarray(action["action"], dtype=np.float32)
+            elif "action.arm.position" in action and "action.effector.position" in action:
+                physical = np.concatenate(
+                    (
+                        np.asarray(action["action.arm.position"], dtype=np.float32),
+                        np.asarray(action["action.effector.position"], dtype=np.float32),
+                    ),
+                    axis=-1,
+                )
+            else:
+                raise RuntimeError(f"无法识别 LingBot SO-101 action keys: {sorted(action)}")
+            if physical.ndim != 2 or physical.shape[1] != 6 or not np.isfinite(physical).all():
+                raise RuntimeError(f"SO-101 action 合同不匹配: {physical.shape}")
+            normalized_np = SO101ActionCodec.normalize(physical)
             return LingBotReferenceFeatures(
                 action=action,
                 normalized_action=normalized_np,
