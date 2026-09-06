@@ -21,6 +21,8 @@ leader 缓慢对齐 follower，确认对齐后才允许卸掉 leader 力矩并�
 - 连续保存相机观测、关节状态、策略动作、实际动作、控制来源、事件和结果；
 - 崩溃后保留 `.partial` 目录，可审计、恢复，不浪费 rollout；
 - 终端键盘仍可作为两键设备的备用控制入口。
+- 支持三键 Y03：按键 1 接管并对齐、按键 2 确认 leader 卸力、按键 3 成功并保存；
+  失败和放弃保留终端 `F/Q`，避免单个物理键误触成失败或急停。
 
 `recap-rlt` 分支正在实现在线强化学习层：冻结 LingBot，用纯 PyTorch residual actor、
 twin critic 和可恢复 replay 学习人工纠正轨迹。设计、迁移边界和上线门槛见
@@ -178,6 +180,12 @@ lingbot-recap collect \
   --top-camera /dev/video2 \
   --wrist-camera /dev/video1 \
   --button-config configs/two_button_keyboard.local.json
+```
+
+使用三键 Y03 时，将最后一行换成：
+
+```bash
+  --three-button-config configs/y03_recap.local.json
 ```
 
 终端必须保持前台运行，因为 `S/F/R/Q/Space` 是备用控制键；两键设备本身直接读 evdev，

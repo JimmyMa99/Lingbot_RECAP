@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "device": "/dev/input/by-id/usb-SDCINNOVATION_Y03_SERIAL-event-kbd",
+  "buttons": {
+    "takeover": {"code": 46, "name": "KEY_C", "physical": "button_1"},
+    "release": {"code": 47, "name": "KEY_V", "physical": "button_2"},
+    "success": {"code": 32, "name": "KEY_D", "physical": "button_3"}
+  }
+}

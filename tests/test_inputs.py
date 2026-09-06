@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from lingbot_recap.inputs import LinuxTwoButtonEventSource
+from lingbot_recap.inputs import LinuxThreeButtonEventSource, LinuxTwoButtonEventSource
 from lingbot_recap.types import InputEvent
 
 
@@ -35,3 +35,35 @@ def test_two_button_config_rejects_duplicate_codes(tmp_path):
     write_config(config, align=2, release=2)
     with pytest.raises(ValueError, match="different key codes"):
         LinuxTwoButtonEventSource(config)
+
+
+def test_three_button_config_maps_unique_actions(tmp_path):
+    config = tmp_path / "three-buttons.json"
+    config.write_text(json.dumps({
+        "device": "/dev/input/by-id/test-event-kbd",
+        "buttons": {
+            "takeover": {"code": 46},
+            "release": {"code": 47},
+            "success": {"code": 32},
+        },
+    }))
+    source = LinuxThreeButtonEventSource(config)
+    assert source.keymap == {
+        46: InputEvent.ALIGN_LEADER,
+        47: InputEvent.RELEASE_LEADER,
+        32: InputEvent.SUCCESS,
+    }
+
+
+def test_three_button_config_rejects_duplicate_codes(tmp_path):
+    config = tmp_path / "three-buttons.json"
+    config.write_text(json.dumps({
+        "device": "/dev/input/by-id/test-event-kbd",
+        "buttons": {
+            "takeover": {"code": 46},
+            "release": {"code": 46},
+            "success": {"code": 32},
+        },
+    }))
+    with pytest.raises(ValueError, match="three different"):
+        LinuxThreeButtonEventSource(config)

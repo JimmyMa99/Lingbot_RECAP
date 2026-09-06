@@ -126,6 +126,61 @@ class LinuxTwoButtonEventSource(AbstractContextManager):
         return False
 
 
+class LinuxThreeButtonEventSource(AbstractContextManager):
+    """Read a three-key macro pad as takeover, release and success controls."""
+
+    LOGICAL_EVENTS = {
+        "takeover": InputEvent.ALIGN_LEADER,
+        "release": InputEvent.RELEASE_LEADER,
+        "success": InputEvent.SUCCESS,
+    }
+
+    def __init__(self, config_path: str | Path):
+        config = json.loads(Path(config_path).read_text())
+        self.device = str(config["device"])
+        buttons = config["buttons"]
+        self.keymap = {
+            int(buttons[name]["code"]): event
+            for name, event in self.LOGICAL_EVENTS.items()
+        }
+        if len(self.keymap) != len(self.LOGICAL_EVENTS):
+            raise ValueError("takeover/release/success must use three different key codes")
+        self._fd: int | None = None
+        self._buffer = bytearray()
+        self._events = deque()
+
+    def __enter__(self):
+        self._fd = os.open(self.device, os.O_RDONLY | os.O_NONBLOCK)
+        return self
+
+    def poll(self) -> InputEvent | None:
+        if self._events:
+            return self._events.popleft()
+        if self._fd is None:
+            raise RuntimeError("three-button event source is not open")
+        while True:
+            try:
+                chunk = os.read(self._fd, INPUT_EVENT_STRUCT.size * 32)
+            except BlockingIOError:
+                break
+            if not chunk:
+                raise RuntimeError(f"button device disconnected: {self.device}")
+            self._buffer.extend(chunk)
+        while len(self._buffer) >= INPUT_EVENT_STRUCT.size:
+            raw = self._buffer[: INPUT_EVENT_STRUCT.size]
+            del self._buffer[: INPUT_EVENT_STRUCT.size]
+            _sec, _usec, event_type, code, value = INPUT_EVENT_STRUCT.unpack(raw)
+            if event_type == EV_KEY and value == KEY_DOWN and code in self.keymap:
+                self._events.append(self.keymap[code])
+        return self._events.popleft() if self._events else None
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._fd is not None:
+            os.close(self._fd)
+            self._fd = None
+        return False
+
+
 class CompositeEventSource(AbstractContextManager):
     """Poll several input sources while preserving their context cleanup."""
 
