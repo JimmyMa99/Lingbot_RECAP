@@ -83,6 +83,7 @@ class ExperienceJournal:
         action_source: str,
         control_mode: str,
         image_jpegs: Mapping[str, bytes] | None = None,
+        policy_context: Mapping[str, Any] | None = None,
     ) -> None:
         image_paths = {}
         for camera, data in (image_jpegs or {}).items():
@@ -103,6 +104,7 @@ class ExperienceJournal:
             "action_source": action_source,
             "control_mode": control_mode,
             "images": image_paths,
+            "policy_context": dict(policy_context or {}),
         }
         self._append(self._frames, payload, force_sync=self.frame_index % self.fsync_every == 0)
         self.frame_index += 1

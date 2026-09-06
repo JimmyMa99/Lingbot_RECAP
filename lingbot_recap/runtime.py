@@ -60,6 +60,7 @@ class ExperienceCollector:
         )
         self.running = True
         self.outcome = "aborted"
+        self.policy_chunk_index = 0
 
     def _handle_common_event(self, event: InputEvent | None) -> bool:
         if event is InputEvent.SUCCESS:
@@ -138,6 +139,8 @@ class ExperienceCollector:
         state = self.follower.read_positions()
         images = self.cameras.capture_jpegs()
         result = self.policy.infer(self.config.task, state, images)
+        chunk_id = f"policy_chunk_{self.policy_chunk_index:08d}"
+        self.policy_chunk_index += 1
         proposed_first = action_dict(result.chunk[0])
         detection = None
         if self.config.detectors_enabled:
@@ -150,7 +153,12 @@ class ExperienceCollector:
             )
         self.journal.event(
             "policy_chunk",
-            {"timing_ms": result.timing_ms, "chunk_length": len(result.chunk)},
+            {
+                "chunk_id": chunk_id,
+                "timing_ms": result.timing_ms,
+                "chunk_length": len(result.chunk),
+                "reference_actions": [action_dict(action) for action in result.chunk],
+            },
         )
         if detection is not None:
             self.handoff.request_takeover(detection.reason, detection.details)
@@ -158,7 +166,7 @@ class ExperienceCollector:
                 "检测到策略卡住，已暂停。按按键 1/空格对齐主臂，按 R 恢复自动"
             )
             return
-        for action in result.chunk[: self.config.execute_length]:
+        for chunk_offset, action in enumerate(result.chunk[: self.config.execute_length]):
             if not self.running or self.handoff.mode is not ControlMode.AUTO:
                 break
             event = self.events.poll()
@@ -184,6 +192,7 @@ class ExperienceCollector:
                 action_source="lingbot_policy",
                 control_mode=self.handoff.mode.value,
                 image_jpegs=image_jpegs,
+                policy_context={"chunk_id": chunk_id, "chunk_offset": chunk_offset},
             )
             time.sleep(max(0.0, 1.0 / self.config.fps - (time.perf_counter() - started)))
 

@@ -28,3 +28,8 @@ episode_YYYYmmdd_HHMMSS_<id>.partial/
 每个事件记录 action chunk、检测器报警、接管原因、leader 对齐、已验证的 leader 力矩状态、
 控制权交还、任务结果及运行时异常。这是一份 RL experience 日志，默认明确排除在现有 SFT
 数据清单之外。
+
+`recap-rlt` 分支中的 `policy_chunk` 事件额外保存完整 `reference_actions`、稳定的 `chunk_id`
+和推理耗时；对应的自动控制 frame 保存 `chunk_id` 与 `chunk_offset`。这是必要的，因为
+LingBot flow matching 的初始噪声具有随机性，不能在 episode 结束后重新推理并假定能还原
+rollout 当时的 reference chunk。

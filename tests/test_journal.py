@@ -12,6 +12,7 @@ def test_journal_is_separate_from_sft_and_atomic(tmp_path):
         action_source="policy",
         control_mode="auto",
         image_jpegs={"top": b"jpeg"},
+        policy_context={"chunk_id": "policy_chunk_00000000", "chunk_offset": 0},
     )
     completed = journal.close("success")
     assert completed.suffix == ".complete"
@@ -19,6 +20,11 @@ def test_journal_is_separate_from_sft_and_atomic(tmp_path):
     metadata = json.loads((completed / "metadata.json").read_text())
     assert metadata["training_use"] == "RECAP_RL_EXPERIENCE_ONLY_NOT_SFT"
     assert len((completed / "frames.jsonl").read_text().splitlines()) == 1
+    frame = json.loads((completed / "frames.jsonl").read_text().splitlines()[0])
+    assert frame["policy_context"] == {
+        "chunk_id": "policy_chunk_00000000",
+        "chunk_offset": 0,
+    }
 
 
 def test_incomplete_episode_is_recoverable(tmp_path):
