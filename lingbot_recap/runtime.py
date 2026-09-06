@@ -104,8 +104,8 @@ class ExperienceCollector:
         except LeaderAlignmentError as exc:
             self.handoff.recover_failed_alignment(exc)
             self.notifier.announce(
-                "主臂未到对齐阈值：从臂继续保持，主臂已卸力。"
-                "请手动把主臂靠近从臂姿态，再按按键 1 重试"
+                "主臂未到对齐阈值：主从臂均保持当前位置。"
+                "请松开主臂后再按按键 1 重试；如需卸力调整，请按 Q 结束本条"
             )
             return
         self.notifier.announce("主臂已对齐。按按键 2 卸力并开始人工接管")

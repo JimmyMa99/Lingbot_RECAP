@@ -141,7 +141,7 @@ class AlignmentTests(unittest.TestCase):
         self.assertEqual(collector.handoff.mode, ControlMode.FAULT)
         self.assertLess(leader.goal["shoulder_pan"], 5)
 
-    def test_runtime_alignment_failure_keeps_follower_holding_and_allows_retry(self):
+    def test_runtime_alignment_failure_keeps_both_arms_holding_and_allows_retry(self):
         from unittest.mock import Mock
         from lingbot_recap.runtime import ExperienceCollector
 
@@ -166,10 +166,11 @@ class AlignmentTests(unittest.TestCase):
         self.assertEqual(collector.handoff.mode, ControlMode.TAKEOVER_PENDING)
         self.assertEqual(follower.goal, self.target)
         self.assertTrue(follower.torque)
-        self.assertFalse(leader.torque)
+        self.assertTrue(leader.torque)
+        self.assertEqual(leader.goal, leader.positions)
 
     def test_default_tolerance_accepts_observed_elbow_static_error(self):
-        self.assertGreater(AlignmentConfig().tolerance, 3.231)
+        self.assertGreater(AlignmentConfig().tolerance, 4.194)
 
 
 if __name__ == "__main__":
