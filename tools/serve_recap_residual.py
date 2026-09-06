@@ -26,6 +26,11 @@ from lingbot_recap.visual_token import VisualTokenBottleneck, VisualTokenConfig
 
 def load_actor(path: Path, device: torch.device) -> tuple[ResidualChunkActor, OnlineRLConfig]:
     value = torch.load(path, map_location="cpu", weights_only=False)
+    if value.get("kind") == "supervised_intervention_residual":
+        config = OnlineRLConfig.from_dict(value["config"])
+        actor = ResidualChunkActor(config).to(device).eval()
+        actor.load_state_dict(value["actor"], strict=True)
+        return actor, config
     if not value.get("bootstrap_completed") or value.get("online_enabled"):
         raise RuntimeError(f"unexpected learner checkpoint state: {path}")
     config = OnlineRLConfig.from_dict(value["agent"]["config"])
@@ -71,7 +76,10 @@ def main() -> None:
     actors = {}
     config = None
     for phase in ("grasp", "place"):
-        actor, phase_config = load_actor(args.residual_root / phase / "checkpoints/latest.pt", device)
+        direct = args.residual_root / phase / "best.pt"
+        actor, phase_config = load_actor(
+            direct if direct.exists() else args.residual_root / phase / "checkpoints/latest.pt", device
+        )
         if config is not None and phase_config != config:
             raise RuntimeError("grasp/place actor configs differ")
         config = phase_config
