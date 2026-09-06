@@ -60,9 +60,10 @@ policy delay 2、UTD 5。探索噪声只能在完成 held-shadow 和人工急停
 
 ## 当前代码边界
 
-当前分支已经完成可独立测试的 PyTorch learner 核心，但尚未把 RL 动作接入真机。仍需完成：
+当前分支已经完成可独立测试的 PyTorch learner 核心、LingBot prefix 视觉 token 的无侵入
+捕获器，以及带 zero-token ablation 的视觉 bottleneck。尚未把 RL 动作接入真机。仍需完成：
 
-- LingBot 推理侧视觉 token 导出及 512D bottleneck 训练；
+- 在真实 LingBot checkpoint 上缓存视觉 token并训练 512D bottleneck；
 - 将 `.complete` experience 编码成 chunk replay；
 - phase 标注和 terminal window 过滤；
 - held-shadow 全链路和真实延迟测试；
