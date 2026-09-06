@@ -4,7 +4,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Protocol
+from typing import Callable, Mapping, Protocol
 
 import numpy as np
 
@@ -32,6 +32,8 @@ class AlignmentConfig:
     frequency_hz: float = 30.0
     tolerance: float = 2.0
     settle_reads: int = 5
+    settle_timeout_s: float = 2.0
+    max_speed: float = 20.0  # calibrated normalized units per second, not degrees
 
 
 class TorqueVerificationError(RuntimeError):
@@ -42,27 +44,79 @@ class LeaderAlignmentError(RuntimeError):
     pass
 
 
+class LeaderAlignmentCancelled(LeaderAlignmentError):
+    pass
+
+
+def validated_positions(positions: Mapping[str, float]) -> dict[str, float]:
+    values = {name: float(positions[name]) for name in MOTOR_NAMES}
+    for name, value in values.items():
+        lower = 0.0 if name == "gripper" else -100.0
+        if not np.isfinite(value) or not lower <= value <= 100.0:
+            raise ValueError(f"invalid calibrated position: {name}={value}")
+    return values
+
+
 def align_leader_to_follower(
     leader: Arm,
     follower_positions: Mapping[str, float],
     config: AlignmentConfig = AlignmentConfig(),
+    *,
+    progress: Callable[[Mapping], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> None:
     """Actively align leader, then verify it is settled. Does not unload it."""
+    if (not all(np.isfinite(v) for v in (
+        config.duration_s, config.frequency_hz, config.tolerance,
+        config.settle_timeout_s, config.max_speed,
+    )) or config.duration_s < 0 or config.frequency_hz <= 0
+        or config.tolerance <= 0 or config.settle_reads < 1
+        or config.settle_timeout_s <= 0 or config.max_speed <= 0):
+        raise ValueError("invalid alignment configuration")
+    goal = validated_positions(follower_positions)
+    start = validated_positions(leader.read_positions())
+    duration = max(config.duration_s, max(abs(goal[n] - start[n]) for n in MOTOR_NAMES) / config.max_speed)
+    steps = max(1, int(np.ceil(duration * config.frequency_hz)))
+    latest = {}
+
+    def check_cancel():
+        if cancelled is not None and cancelled():
+            raise LeaderAlignmentCancelled("leader alignment cancelled by operator")
+
+    def report(phase, target):
+        nonlocal latest
+        actual = validated_positions(leader.read_positions())
+        errors = {n: abs(actual[n] - goal[n]) for n in MOTOR_NAMES}
+        latest = {"phase": phase, "target": dict(target), "goal": goal,
+                  "actual": actual, "abs_error": errors,
+                  "max_error": max(errors.values()), "tolerance": config.tolerance}
+        if progress is not None:
+            progress(latest)
+        return latest["max_error"]
+
+    check_cancel()
+    # Seed the present pose while torque is off, before enabling an old goal.
+    leader.command_positions(start)
     leader.enable_torque()
-    start = leader.read_positions()
-    steps = max(1, round(config.duration_s * config.frequency_hz))
+    report("start", start)
+    report_every = max(1, round(config.frequency_hz / 4))
     for step in range(1, steps + 1):
+        check_cancel()
         alpha = step / steps
         target = {
-            name: float(start[name] + (follower_positions[name] - start[name]) * alpha)
+            name: float(start[name] + (goal[name] - start[name]) * alpha)
             for name in MOTOR_NAMES
         }
         leader.command_positions(target)
+        if step % report_every == 0 or step == steps:
+            report("moving", target)
         time.sleep(1.0 / config.frequency_hz)
     settled = 0
-    for _ in range(config.settle_reads * 3):
-        actual = leader.read_positions()
-        error = max(abs(actual[name] - follower_positions[name]) for name in MOTOR_NAMES)
+    deadline = time.monotonic() + config.settle_timeout_s
+    while time.monotonic() < deadline:
+        check_cancel()
+        leader.command_positions(goal)
+        error = report("settling", goal)
         if error <= config.tolerance:
             settled += 1
             if settled >= config.settle_reads:
@@ -70,7 +124,12 @@ def align_leader_to_follower(
         else:
             settled = 0
         time.sleep(1.0 / config.frequency_hz)
-    raise LeaderAlignmentError("leader failed to settle within alignment tolerance")
+    offenders = {n: round(e, 3) for n, e in latest["abs_error"].items() if e > config.tolerance}
+    raise LeaderAlignmentError(
+        f"leader failed to settle within {config.settle_timeout_s}s; "
+        f"tolerance={config.tolerance} normalized units; offending_joints={offenders}; "
+        f"actual={latest['actual']}; target={goal}"
+    )
 
 
 class SO101BusArm:

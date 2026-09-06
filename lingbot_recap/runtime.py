@@ -7,7 +7,7 @@ from pathlib import Path
 from .cameras import OpenCVCameraRig
 from .detectors import DetectorSuite
 from .handoff import HandoffCoordinator
-from .hardware import MOTOR_NAMES, SO101BusArm
+from .hardware import MOTOR_NAMES, SO101BusArm, LeaderAlignmentCancelled
 from .inputs import EventSource
 from .journal import ExperienceJournal
 from .notifier import ConsoleNotifier
@@ -79,8 +79,23 @@ class ExperienceCollector:
 
     def _align_leader(self) -> None:
         self.notifier.announce("主臂即将自动对齐，请松手并远离关节")
-        time.sleep(1.0)
-        self.handoff.align_leader()
+        def cancelled():
+            event = self.events.poll()
+            if event in (InputEvent.QUIT, InputEvent.FAILURE):
+                self._handle_common_event(event)
+                return True
+            # Discard premature release/success presses during alignment.
+            return False
+
+        for _ in range(30):
+            if cancelled():
+                return
+            time.sleep(1.0 / 30)
+        try:
+            self.handoff.align_leader(cancelled=cancelled)
+        except LeaderAlignmentCancelled:
+            self.notifier.announce("已中止主臂对齐，正在保存并退出")
+            return
         self.notifier.announce("主臂已对齐。按按键 2 卸力并开始人工接管")
 
     def _release_leader(self) -> None:

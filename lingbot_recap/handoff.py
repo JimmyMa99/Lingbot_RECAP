@@ -42,13 +42,17 @@ class HandoffCoordinator:
         self.align_leader()
         self.release_leader_for_human()
 
-    def align_leader(self) -> None:
+    def align_leader(self, cancelled: Callable[[], bool] | None = None) -> None:
         if self.mode is not ControlMode.TAKEOVER_PENDING or self._hold_position is None:
             raise RuntimeError(f"cannot align leader from {self.mode}")
         self.mode = ControlMode.ALIGNING_LEADER
         self._emit("leader_alignment_started", {})
         try:
-            align_leader_to_follower(self.leader, self._hold_position, self.config.alignment)
+            align_leader_to_follower(
+                self.leader, self._hold_position, self.config.alignment,
+                progress=lambda details: self._emit("leader_alignment_progress", details),
+                cancelled=cancelled,
+            )
         except Exception as exc:
             self.mode = ControlMode.FAULT
             self.follower.command_positions(self._hold_position)
