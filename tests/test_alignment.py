@@ -54,7 +54,7 @@ class AlignmentTests(unittest.TestCase):
         self.patcher.start()
         self.addCleanup(self.patcher.stop)
         self.target = dict.fromkeys(MOTOR_NAMES, 5.0)
-        self.config = AlignmentConfig(duration_s=0, settle_reads=2)
+        self.config = AlignmentConfig(duration_s=0, tolerance=2, settle_reads=2)
 
     def test_preloads_position_before_torque_and_keeps_torque_after_success(self):
         arm = SimArm(self.clock)
@@ -130,6 +130,8 @@ class AlignmentTests(unittest.TestCase):
         collector.events.poll.side_effect = lambda: InputEvent.QUIT if self.clock.now > 1.05 else None
         follower = SimArm(self.clock)
         follower.positions = dict(self.target)
+        follower.goal = dict(self.target)
+        follower.torque = True
         leader = SimArm(self.clock)
         collector.handoff = HandoffCoordinator(follower, leader, config=HandoffConfig(self.config))
         collector.handoff.request_takeover("test")
@@ -138,6 +140,36 @@ class AlignmentTests(unittest.TestCase):
         self.assertFalse(collector.running)
         self.assertEqual(collector.handoff.mode, ControlMode.FAULT)
         self.assertLess(leader.goal["shoulder_pan"], 5)
+
+    def test_runtime_alignment_failure_keeps_follower_holding_and_allows_retry(self):
+        from unittest.mock import Mock
+        from lingbot_recap.runtime import ExperienceCollector
+
+        collector = ExperienceCollector.__new__(ExperienceCollector)
+        collector.notifier = Mock()
+        collector.events = Mock()
+        collector.events.poll.return_value = None
+        collector.running = True
+        collector.outcome = "aborted"
+        follower = SimArm(self.clock)
+        follower.positions = dict(self.target)
+        follower.goal = dict(self.target)
+        follower.torque = True
+        leader = SimArm(self.clock, stuck="shoulder_lift")
+        collector.handoff = HandoffCoordinator(
+            follower, leader, config=HandoffConfig(self.config)
+        )
+        collector.handoff.request_takeover("test")
+        with patch("lingbot_recap.runtime.time", self.clock):
+            collector._align_leader()
+        self.assertTrue(collector.running)
+        self.assertEqual(collector.handoff.mode, ControlMode.TAKEOVER_PENDING)
+        self.assertEqual(follower.goal, self.target)
+        self.assertTrue(follower.torque)
+        self.assertFalse(leader.torque)
+
+    def test_default_tolerance_accepts_observed_elbow_static_error(self):
+        self.assertGreater(AlignmentConfig().tolerance, 3.231)
 
 
 if __name__ == "__main__":

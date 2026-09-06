@@ -30,7 +30,7 @@ class Arm(Protocol):
 class AlignmentConfig:
     duration_s: float = 4.0
     frequency_hz: float = 30.0
-    tolerance: float = 2.0
+    tolerance: float = 4.0
     settle_reads: int = 5
     settle_timeout_s: float = 2.0
     max_speed: float = 20.0  # calibrated normalized units per second, not degrees

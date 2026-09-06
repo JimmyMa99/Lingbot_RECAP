@@ -74,6 +74,18 @@ class HandoffCoordinator:
         self.mode = ControlMode.HUMAN
         self._emit("human_control_granted", {"leader_torque_enable": torque_state})
 
+    def recover_failed_alignment(self, error: Exception) -> None:
+        """Keep follower holding and make the leader movable before a retry."""
+        if self.mode is not ControlMode.FAULT or self._hold_position is None:
+            raise RuntimeError(f"cannot recover alignment from {self.mode}")
+        self.follower.command_positions(self._hold_position)
+        torque_state = self.leader.disable_torque_verified()
+        self.mode = ControlMode.TAKEOVER_PENDING
+        self._emit(
+            "leader_alignment_retry_ready",
+            {"error": repr(error), "leader_torque_enable": torque_state},
+        )
+
     def policy_command(self, positions: Mapping[str, float]) -> None:
         if self.mode is not ControlMode.AUTO:
             raise RuntimeError(f"policy is not controller in mode={self.mode}")

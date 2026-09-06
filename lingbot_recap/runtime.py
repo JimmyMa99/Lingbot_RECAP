@@ -7,7 +7,12 @@ from pathlib import Path
 from .cameras import OpenCVCameraRig
 from .detectors import DetectorSuite
 from .handoff import HandoffCoordinator
-from .hardware import MOTOR_NAMES, SO101BusArm, LeaderAlignmentCancelled
+from .hardware import (
+    MOTOR_NAMES,
+    SO101BusArm,
+    LeaderAlignmentCancelled,
+    LeaderAlignmentError,
+)
 from .inputs import EventSource
 from .journal import ExperienceJournal
 from .notifier import ConsoleNotifier
@@ -95,6 +100,13 @@ class ExperienceCollector:
             self.handoff.align_leader(cancelled=cancelled)
         except LeaderAlignmentCancelled:
             self.notifier.announce("已中止主臂对齐，正在保存并退出")
+            return
+        except LeaderAlignmentError as exc:
+            self.handoff.recover_failed_alignment(exc)
+            self.notifier.announce(
+                "主臂未到对齐阈值：从臂继续保持，主臂已卸力。"
+                "请手动把主臂靠近从臂姿态，再按按键 1 重试"
+            )
             return
         self.notifier.announce("主臂已对齐。按按键 2 卸力并开始人工接管")
 
