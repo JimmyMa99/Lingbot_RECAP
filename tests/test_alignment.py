@@ -20,10 +20,11 @@ class Clock:
 
 
 class SimArm:
-    def __init__(self, clock, *, stuck=None, delay=0):
+    def __init__(self, clock, *, stuck=None, delay=0, bias=None):
         self.clock = clock
         self.stuck = stuck
         self.delay = delay
+        self.bias = bias or {}
         self.positions = dict.fromkeys(MOTOR_NAMES, 0.0)
         self.goal = dict(self.positions)
         self.history = []
@@ -31,7 +32,10 @@ class SimArm:
 
     def read_positions(self):
         if self.clock.now >= self.delay and self.torque:
-            self.positions.update({k: v for k, v in self.goal.items() if k != self.stuck})
+            self.positions.update({
+                k: v + self.bias.get(k, 0.0)
+                for k, v in self.goal.items() if k != self.stuck
+            })
         return dict(self.positions)
 
     def command_positions(self, target):
@@ -171,6 +175,29 @@ class AlignmentTests(unittest.TestCase):
 
     def test_default_tolerance_accepts_observed_elbow_static_error(self):
         self.assertGreater(AlignmentConfig().tolerance, 4.194)
+
+    def test_bounded_settle_compensation_cancels_gravity_bias(self):
+        arm = SimArm(self.clock, bias={"shoulder_lift": 5.1})
+        reports = []
+        align_leader_to_follower(
+            arm, self.target,
+            AlignmentConfig(duration_s=0, tolerance=2, settle_reads=2),
+            progress=reports.append,
+        )
+        self.assertLessEqual(
+            reports[-1]["abs_error"]["shoulder_lift"], 2
+        )
+        self.assertGreaterEqual(arm.goal["shoulder_lift"], -3)
+        self.assertLess(arm.goal["shoulder_lift"], self.target["shoulder_lift"])
+
+    def test_settle_compensation_is_bounded_for_stuck_joint(self):
+        arm = SimArm(self.clock, stuck="shoulder_lift")
+        with self.assertRaises(LeaderAlignmentError):
+            align_leader_to_follower(
+                arm, self.target,
+                AlignmentConfig(duration_s=0, tolerance=2, settle_reads=2),
+            )
+        self.assertGreaterEqual(arm.goal["shoulder_lift"], -3)
 
 
 if __name__ == "__main__":

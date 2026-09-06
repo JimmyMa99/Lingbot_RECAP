@@ -34,6 +34,9 @@ class AlignmentConfig:
     settle_reads: int = 5
     settle_timeout_s: float = 2.0
     max_speed: float = 20.0  # calibrated normalized units per second, not degrees
+    max_settle_compensation: float = 8.0
+    compensation_step: float = 1.0
+    compensation_frequency_hz: float = 10.0
 
 
 class TorqueVerificationError(RuntimeError):
@@ -68,10 +71,13 @@ def align_leader_to_follower(
     """Actively align leader, then verify it is settled. Does not unload it."""
     if (not all(np.isfinite(v) for v in (
         config.duration_s, config.frequency_hz, config.tolerance,
-        config.settle_timeout_s, config.max_speed,
+        config.settle_timeout_s, config.max_speed, config.max_settle_compensation,
+        config.compensation_step, config.compensation_frequency_hz,
     )) or config.duration_s < 0 or config.frequency_hz <= 0
         or config.tolerance <= 0 or config.settle_reads < 1
-        or config.settle_timeout_s <= 0 or config.max_speed <= 0):
+        or config.settle_timeout_s <= 0 or config.max_speed <= 0
+        or config.max_settle_compensation < 0 or config.compensation_step <= 0
+        or config.compensation_frequency_hz <= 0):
         raise ValueError("invalid alignment configuration")
     goal = validated_positions(follower_positions)
     start = validated_positions(leader.read_positions())
@@ -113,16 +119,40 @@ def align_leader_to_follower(
         time.sleep(1.0 / config.frequency_hz)
     settled = 0
     deadline = time.monotonic() + config.settle_timeout_s
+    compensation = {name: 0.0 for name in MOTOR_NAMES}
+    compensation_interval = max(1, round(config.frequency_hz / config.compensation_frequency_hz))
+    settle_iteration = 0
     while time.monotonic() < deadline:
         check_cancel()
-        leader.command_positions(goal)
-        error = report("settling", goal)
+        commanded = {
+            name: float(np.clip(
+                goal[name] + compensation[name],
+                0.0 if name == "gripper" else -100.0,
+                100.0,
+            ))
+            for name in MOTOR_NAMES
+        }
+        leader.command_positions(commanded)
+        error = report("settling", commanded)
         if error <= config.tolerance:
             settled += 1
             if settled >= config.settle_reads:
                 return
         else:
             settled = 0
+            if settle_iteration % compensation_interval == 0:
+                for name in MOTOR_NAMES:
+                    correction = float(np.clip(
+                        goal[name] - latest["actual"][name],
+                        -config.compensation_step,
+                        config.compensation_step,
+                    ))
+                    compensation[name] = float(np.clip(
+                        compensation[name] + correction,
+                        -config.max_settle_compensation,
+                        config.max_settle_compensation,
+                    ))
+        settle_iteration += 1
         time.sleep(1.0 / config.frequency_hz)
     offenders = {n: round(e, 3) for n, e in latest["abs_error"].items() if e > config.tolerance}
     raise LeaderAlignmentError(
