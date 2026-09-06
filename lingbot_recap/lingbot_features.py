@@ -101,3 +101,72 @@ class LingBotVisualTokenCapture:
                 normalized_action=normalized_np,
                 visual_tokens=self._captured.numpy(),
             )
+
+
+@torch.inference_mode()
+def extract_visual_tokens_from_transformed(
+    model: Any,
+    observation: dict[str, torch.Tensor],
+    *,
+    device: str = "cuda",
+    dtype: torch.dtype = torch.bfloat16,
+) -> np.ndarray:
+    """只执行 LingBot prefix 前向，不运行 flow-matching action denoise。"""
+
+    from lingbotvla.models.vla.lingbot_vla.modeling_lingbot_vla_v2 import (
+        make_att_2d_masks,
+    )
+
+    images = observation["images"]
+    img_masks = observation["img_masks"]
+    lang_tokens = observation["lang_tokens"]
+    lang_masks = observation["lang_masks"]
+    image_grid_thw = observation.get("image_grid_thw")
+    if images.ndim == 4:
+        images = images.unsqueeze(0)
+        img_masks = img_masks.unsqueeze(0)
+    if lang_tokens.ndim == 1:
+        lang_tokens = lang_tokens.unsqueeze(0)
+        lang_masks = lang_masks.unsqueeze(0)
+    (
+        prefix_embs,
+        prefix_pad_masks,
+        prefix_att_masks,
+        prefix_position_ids,
+        visual_pos_masks,
+        deepstack_visual_embeds,
+    ) = model.embed_prefix(
+        images.to(device=device, dtype=dtype),
+        img_masks.to(device=device),
+        lang_tokens.to(device=device),
+        lang_masks.to(device=device),
+        image_grid_thw=(
+            None if image_grid_thw is None else image_grid_thw.to(device=device, dtype=torch.long)
+        ),
+    )
+    outputs, _, _ = model.qwenvl_with_expert.forward(
+        attention_mask=make_att_2d_masks(prefix_pad_masks, prefix_att_masks),
+        position_ids=prefix_position_ids,
+        vlm_position_ids=prefix_position_ids,
+        past_key_values=None,
+        inputs_embeds=[prefix_embs, None],
+        use_cache=False,
+        fill_kv_cache=False,
+        visual_pos_masks=visual_pos_masks,
+        deepstack_visual_embeds=deepstack_visual_embeds,
+    )
+    prefix = outputs[0]
+    mask = visual_pos_masks.to(device=prefix.device, dtype=torch.bool)
+    if mask.ndim == 3 and mask.shape[-1] == 1:
+        mask = mask.squeeze(-1)
+    if prefix.ndim != 3 or mask.shape != prefix.shape[:2]:
+        raise RuntimeError(
+            f"LingBot prefix/mask 合同不匹配: {tuple(prefix.shape)} / {tuple(mask.shape)}"
+        )
+    counts = mask.sum(dim=1)
+    if torch.any(counts <= 0) or not torch.all(counts == counts[0]):
+        raise RuntimeError(f"视觉 token 数不一致: {counts.tolist()}")
+    selected = prefix[mask].reshape(prefix.shape[0], int(counts[0]), prefix.shape[-1])
+    if not torch.isfinite(selected).all():
+        raise FloatingPointError("视觉 token 包含 NaN/Inf")
+    return selected.detach().float().cpu().numpy()
