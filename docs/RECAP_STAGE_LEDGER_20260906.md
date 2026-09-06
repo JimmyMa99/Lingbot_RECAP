@@ -46,6 +46,17 @@
 - failure 保留给后续带奖励的 RL，不作为监督动作目标。
 - 新增 35 条中的失败 episode：`episode_20260906_213817_6c75aee7.complete`。
 
+### v5（接管前纠正锚点）
+
+- 权重：`experiments/lingbot_recap_straw_cup_intervention_residual_v5_20260906`
+- 日志：`logs/recap_intervention_residual_v5_20260906.log`
+- 数据：99 条 sealed episode，其中 95 条 success、4 条 failure。
+- 监督训练：85 条 success 训练，10 条 success held-out；4 条 failure 继续隔离保存。
+- 策略修正：每条 episode 最后 4 个接管前决策点学习紧随其后的人工纠正 chunk；
+  更早的 zero-residual 上下文只占采样总质量 10%，人工帧与纠正锚点占 90%。
+- 学习率保持 `3e-4`，避免把监督标签问题误判成优化步长不足。
+- 自动部署门禁：grasp/place 必须全部 finite，且 held-out action MAE 均优于冻结 teacher。
+
 ## 保留规则
 
 1. 每一阶段必须使用新的实验目录；不得覆盖上一阶段的 `best.pt`、`latest.pt` 或报告。
