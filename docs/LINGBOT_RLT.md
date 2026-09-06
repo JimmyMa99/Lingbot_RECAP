@@ -42,6 +42,18 @@ LingBot-VLA，只使用 PyTorch 训练很小的 residual actor 与 twin critic�
 若 bottleneck 的 held-out 重构和 zero-token 检查不通过，不得进入真机 online。不要使用
 训练时的未来视频/未来深度标签作为在线状态，因为真机执行时拿不到未来观测。
 
+### 2026-09-06 真实 checkpoint held-shadow
+
+在 H20 空闲卡上加载牛奶盒任务累计 90 epoch 的 LingBot checkpoint，以两路 480×640
+合成图像和 6D state 做了无硬件 smoke。一次原始推理成功同时返回：
+
+- SO-101 reference action：`16×6`，全部 finite；
+- 最终层视觉 token：`1×128×2560`，全部 finite；
+- 视觉 token 标准差：`2.8384`，不是常量输出；
+- 10-step flow matching 单次前向约 `1.70s`（不含模型加载）。
+
+测试进程退出后 H20 GPU 1 显存恢复为 0；没有连接串口、相机或下发动作。
+
 ## 推荐的第一轮流程
 
 第一轮只做一个任务，并拆成 `grasp`、`place` 两个 phase，各自维护独立 replay 和 learner。
