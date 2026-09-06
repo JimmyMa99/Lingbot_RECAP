@@ -55,7 +55,11 @@ def load_phase(encoded_root: Path, auto_root: Path, phase: str, held_out: set[st
                 count = len(value["state"])
                 for bucket, key in zip(splits[split][:3], ("state", "reference", "action"), strict=True):
                     bucket.append(value[key])
-                splits[split][3].append(np.zeros(count, dtype=np.float32))
+                splits[split][3].append(
+                    value["intervention"]
+                    if "intervention" in value.files
+                    else np.zeros(count, dtype=np.float32)
+                )
     return {
         split: tuple(np.concatenate(items) for items in values)
         for split, values in splits.items()
@@ -106,8 +110,11 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--residual-limit", type=float, default=.20)
     parser.add_argument("--gripper-residual-limit", type=float, default=.60)
+    parser.add_argument("--zero-context-mass", type=float, default=.10)
     parser.add_argument("--seed", type=int, default=20260906)
     args = parser.parse_args()
+    if not 0.0 <= args.zero_context_mass < 1.0:
+        raise SystemExit("zero-context-mass must be in [0, 1)")
     random.seed(args.seed); np.random.seed(args.seed); torch.manual_seed(args.seed)
     device = torch.device("cuda")
     held_out = set(args.held_out)
@@ -118,11 +125,14 @@ def main() -> None:
         train_set = ResidualDataset(*data["train"])
         val_set = ResidualDataset(*data["val"])
         intervention = data["train"][3]
-        # Give pre-takeover zero-residual context and human corrections equal total mass.
+        # Human frames and the final pre-takeover correction anchors should
+        # dominate.  Earlier auto context remains a small stability prior.
         if np.any(intervention == 0) and np.any(intervention == 1):
+            corrective_mass = 1.0 - args.zero_context_mass
             weights = np.where(
-                intervention > .5, .5 / max(1, (intervention > .5).sum()),
-                .5 / max(1, (intervention < .5).sum()),
+                intervention > .5,
+                corrective_mass / max(1, (intervention > .5).sum()),
+                args.zero_context_mass / max(1, (intervention < .5).sum()),
             )
             sampler = WeightedRandomSampler(torch.from_numpy(weights).double(), len(train_set), replacement=True)
             loader = DataLoader(train_set, batch_size=args.batch_size, sampler=sampler)

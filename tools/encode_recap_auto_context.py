@@ -16,7 +16,7 @@ from PIL import Image
 
 from lingbot_recap.experience_replay import joint_vector
 from lingbot_recap.lingbot_features import LingBotVisualTokenCapture
-from lingbot_recap.online_rl import make_state_feature
+from lingbot_recap.online_rl import SO101ActionCodec, make_state_feature
 from lingbot_recap.visual_token import VisualTokenBottleneck, VisualTokenConfig
 
 
@@ -39,6 +39,7 @@ def main() -> None:
     parser.add_argument("--rank", type=int, required=True)
     parser.add_argument("--world-size", type=int, required=True)
     parser.add_argument("--stride", type=int, default=4)
+    parser.add_argument("--anchor-decisions", type=int, default=4)
     parser.add_argument("--task", default="把吸管放进杯子里")
     args = parser.parse_args()
 
@@ -69,8 +70,11 @@ def main() -> None:
             continue
         all_frames = [json.loads(line) for line in (episode / "frames.jsonl").read_text().splitlines()]
         frames = [frame for frame in all_frames if frame.get("control_mode") == "auto"]
+        human_frames = [frame for frame in all_frames if frame.get("control_mode") == "human"]
         if not frames:
             raise RuntimeError(f"{episode.name}: no pre-takeover auto frames")
+        if len(human_frames) < 1:
+            raise RuntimeError(f"{episode.name}: no human correction frames")
         indices = np.arange(0, len(frames), args.stride, dtype=np.int64)
         if indices[-1] != len(frames) - 1:
             indices = np.append(indices, len(frames) - 1)
@@ -103,14 +107,39 @@ def main() -> None:
                 reference = np.concatenate((reference, np.repeat(reference[-1:], 16 - len(reference), axis=0)))
             references.append(reference[:16])
         reference_array = np.stack(references).astype(np.float32)
+        all_human_actions = np.stack(
+            [joint_vector(frame["executed_action"]) for frame in human_frames]
+        )
+        movement = np.max(np.abs(np.diff(all_human_actions, axis=0)), axis=1)
+        moving = np.flatnonzero(movement > 0.5)
+        correction_start = max(0, int(moving[0] + 1) - 2) if len(moving) else 0
+        human_actions = all_human_actions[correction_start : correction_start + 16]
+        if len(human_actions) < 16:
+            human_actions = np.concatenate(
+                (human_actions, np.repeat(human_actions[-1:], 16 - len(human_actions), axis=0))
+            )
+        correction_chunk = SO101ActionCodec.normalize(human_actions).astype(np.float32)
+        actions = reference_array.copy()
+        correction = np.zeros(len(indices), dtype=np.float32)
+        anchor_count = min(max(args.anchor_decisions, 0), len(indices))
+        if anchor_count:
+            # These observations immediately precede intervention.  Label them
+            # with what the human actually did next instead of reinforcing the
+            # failed teacher action with a zero residual target.
+            actions[-anchor_count:] = correction_chunk
+            correction[-anchor_count:] = 1.0
         atomic_npz(
             target, state=np.stack(states).astype(np.float32),
-            reference=reference_array, action=reference_array.copy(),
-            frame_indices=indices,
+            reference=reference_array, action=actions,
+            intervention=correction, frame_indices=indices,
         )
         metadata = {
-            "schema_version": 1, "episode": episode.name, "mode": "auto_zero_residual",
-            "source_frames": len(frames), "transitions": len(indices), "file": target.name,
+            "schema_version": 1, "episode": episode.name,
+            "mode": "pre_takeover_mixed_supervision",
+            "source_frames": len(frames), "transitions": len(indices),
+            "correction_anchors": anchor_count,
+            "human_correction_start": correction_start,
+            "file": target.name,
         }
         temporary = marker.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n")
