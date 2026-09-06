@@ -41,7 +41,12 @@ def main() -> None:
             path = metadata_path.parent / metadata["phases"][phase]["file"]
             with np.load(path, allow_pickle=False) as value:
                 partial = {key: value[key] for key in ("state", "action", "reference")}
-            batch = replay_batch(**partial, success=success)
+            batch = replay_batch(
+                states=partial["state"],
+                actions=partial["action"],
+                references=partial["reference"],
+                success=success,
+            )
             if episode in held_out:
                 held_batches[phase].append(batch)
             else:
